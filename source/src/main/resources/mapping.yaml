@@ -1,0 +1,6 @@
+---
+namespaceMapping:
+- namespace: testSrc
+  mappings:
+  - clusterIndex: 2
+    name: testDest

@@ -1,0 +1,23 @@
+package com.aerospike.examples.manytomany.model;
+
+import java.util.Date;
+import java.util.UUID;
+
+import com.aerospike.mapper.annotations.AerospikeKey;
+import com.aerospike.mapper.annotations.AerospikeRecord;
+
+import lombok.AllArgsConstructor;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+@Data
+@NoArgsConstructor
+@AllArgsConstructor
+@AerospikeRecord(namespace = "${demo.namespace:test}", set = "account")
+public class Account {
+    @AerospikeKey
+    private UUID id;
+    private String accountName;
+    private int balanceInCents;
+    private Date dateOpened;
+}

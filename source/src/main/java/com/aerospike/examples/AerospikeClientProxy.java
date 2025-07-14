@@ -60,7 +60,12 @@ public class AerospikeClientProxy {
                 }
             }
 
-            return method.invoke(delegate, args);
+            try {
+                return method.invoke(delegate, args);
+            }
+            catch (Exception e) {
+                throw e.getCause();
+            }
         }
 
         /**
@@ -71,6 +76,7 @@ public class AerospikeClientProxy {
                 Field txnField = policy.getClass().getField("txn");
                 txnField.set(policy, null);
             } catch (NoSuchFieldException e) {
+                e.printStackTrace();
                 // Field not present – skip
             } catch (IllegalAccessException e) {
                 throw new RuntimeException("Failed to nullify txn in policy: " + policy, e);

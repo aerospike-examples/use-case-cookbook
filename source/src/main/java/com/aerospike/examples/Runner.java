@@ -1,14 +1,20 @@
 package com.aerospike.examples;
 
+import java.io.IOError;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Scanner;
+
+import org.jline.terminal.Terminal;
+import org.jline.terminal.TerminalBuilder;
 
 import com.aerospike.client.AerospikeClient;
 import com.aerospike.client.Host;
 import com.aerospike.client.IAerospikeClient;
 import com.aerospike.client.Info;
 import com.aerospike.client.cluster.Node;
+import com.aerospike.examples.manytomany.ManyToManyRelationships;
 import com.aerospike.examples.onetomany.OneToManyRelationships;
 import com.aerospike.examples.setup.SetupDemo;
 import com.aerospike.mapper.tools.AeroMapper;
@@ -23,7 +29,8 @@ public class Runner {
      */
     private final List<UseCase> useCases = List.of(
             new SetupDemo(),
-            new OneToManyRelationships()
+            new OneToManyRelationships(),
+            new ManyToManyRelationships()
     );
     
     /** The Aerospike client to use for the demonstration */
@@ -323,7 +330,7 @@ public class Runner {
      * At the moment only one argument is accepted, the host and port of the cluster. By default this is
      * "localhost:3000". Currently there is no way to attach to secured clusters.
      */
-    public static void main(String[] args) {
+    public static void main(String[] args) throws IOException {
         String hosts = "localhost:3000";
         if (args.length == 1) {
             hosts = args[0];
@@ -341,7 +348,12 @@ public class Runner {
             }
             AeroMapper mapper = new AeroMapper.Builder(clientToUse).build();
             Runner runner = new Runner(clientToUse, mapper);
-            runner.runMenu(120);
+            Terminal terminal = TerminalBuilder.terminal();
+            int width = terminal.getWidth();
+            if (width == 0) {
+                width = 200;
+            }
+            runner.runMenu(width);
         }
         catch (MissingNamespaceException ignored) {
             System.out.printf("\nFATAL ERROR: This demo suite expects a namespace called '%s', but no nodes "

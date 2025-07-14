@@ -10,6 +10,7 @@ import com.aerospike.client.AerospikeException;
 import com.aerospike.client.Bin;
 import com.aerospike.client.IAerospikeClient;
 import com.aerospike.client.Key;
+import com.aerospike.client.Operation;
 import com.aerospike.client.Record;
 import com.aerospike.client.ResultCode;
 import com.aerospike.client.Txn;
@@ -47,7 +48,8 @@ public class OneToManyRelationships implements UseCase {
     @Override
     public String getDescription() {
         return "Demonstrate how to handle one-to-many relationships in Aerospike. Both being "
-                + "able to query only from the parent to the child, and being able to query from the child to the parent as well, are discussed.";
+                + "able to query only from the parent to the child, and being able to query from the child to the parent as well, are discussed. See "
+                + "https://github.com/aerospike-examples/use-case-cookbook/blob/main/UseCases/one-to-many-relationships.md for details";
     }
 
     /**
@@ -76,7 +78,7 @@ public class OneToManyRelationships implements UseCase {
                         ListOperation.append(setLikeListPolicy, "listings", Value.get(listingId)));
                 
                 // Update the listing to store the referring agent
-                client.put(wp, listingKey, new Bin("agent", agentId));
+                client.put(wp, listingKey, new Bin("agentId", agentId));
                 client.commit(txn);
                 break;
             }
@@ -186,22 +188,26 @@ public class OneToManyRelationships implements UseCase {
         Key listingKey = new Key(mapper.getNamespace(Listing.class), mapper.getSet(Listing.class), listingId);
 
         return Utils.doInTransaction(client, txn -> {
-            Policy policy = client.copyReadPolicyDefault();
-            policy.txn = txn;
-            Record listing = client.get(policy, listingKey, "agentId");
-            if (listing == null) {
-                // record not found
-                return false;
-            }
-            Key agentKey = new Key(mapper.getNamespace(Agent.class), mapper.getSet(Agent.class), listing.getLong("agentId"));
             WritePolicy writePolicy = client.copyWritePolicyDefault();
             writePolicy.txn = txn;
             writePolicy.durableDelete = true;
-            // Remove the listing
-            client.delete(writePolicy, listingKey);
-            // Remove the listing from the list on the agent
-            Record result = client.operate(writePolicy, agentKey, ListOperation.removeByValue("listings", Value.get(listingId), ListReturnType.EXISTS));
-            return result.getBoolean("listings");
+            
+            // Get the agentId from the listing and delete the listing
+            try {
+                Record listing = client.operate(writePolicy, listingKey, 
+                        Operation.get("agentId"),
+                        Operation.delete());
+                Key agentKey = new Key(mapper.getNamespace(Agent.class), mapper.getSet(Agent.class), listing.getLong("agentId"));
+                // Remove the listing from the list on the agent
+                Record result = client.operate(writePolicy, agentKey, ListOperation.removeByValue("listings", Value.get(listingId), ListReturnType.EXISTS));
+                return result.getBoolean("listings");
+            }
+            catch (AerospikeException e) {
+                if (e.getResultCode() == ResultCode.KEY_NOT_FOUND_ERROR) {
+                    return false;
+                }
+                throw e;
+            }
         });
     }
     

@@ -10,12 +10,13 @@ Examples of aggregations (where the "many" might be aggregated into the "one") m
 - Customers have multiple addresses.
 - A credit card has multiple transactions.
 
+See [many-to-many relationshps](many-to-many-relationships.md) for situations where there are many instances of both entities in the same graph.
+
 There are two different possible implementations for one-to-many relationships in aerospike, typically depending on the cardinality of the many:
-- Have the "many" entity store the ID of the "one" and define a secondary index on the 
+- Have the "many" entity store the ID of the "one" and define a secondary index on the id of the "one"
+- Store a list of the "many" keys in the "one"
 
-it makes in a bank there are Customers and Accounts. A customer can have multiple accounts, and accounts can be owned by multiple customers.
-
-In relational databases this many-to-many relationship would result in a foreign key from the many to the one, and probably an index to be able to efficiently retieve the "many" value.
+In relational databases this one-to-many relationship would result in a foreign key from the many to the one, and probably an index to be able to efficiently retieve the "many" value.
 
 In Aerospike, if the number of the "many" is very large (thousands or more) then it makes sense to model the data this way too. The "many" object would hold the id of the "one" and a secondary index query used to discover all of the related entities associated with a particular entity. 
 
@@ -128,7 +129,7 @@ private void addListingToAgent(IAerospikeClient client, AeroMapper mapper, Strin
                     ListOperation.append(setLikeListPolicy, "listings", Value.get(listingId)));
             
             // Update the listing to store the referring agent
-            client.put(wp, listingKey, new Bin("agent", agentId));
+            client.put(wp, listingKey, new Bin("agentId", agentId));
             client.commit(txn);
             break;
         }
@@ -155,6 +156,8 @@ private void addListingToAgent(IAerospikeClient client, AeroMapper mapper, Strin
 First, the two keys are created for our two business entities. Then we create a transaction to ensure atomicity of the updates. 
 
 Updating the list of ids for the agent to insert our new entry is simple enough, but we probably want to make sure that if the listing is already in there that it's not added twice. Hence we tell Aerospike that we want the list ordered (for performance reasonss), and to only add items to the list which are not already there (`ADD_UNIQUE`). If we say to only add unique items and the item already exists an exception will be thrown. We don't care if it's already in the list as our algorithm will work correctly anyway, so we will ignore this error by providing the `NO_FAIL` flag. If we were adding multiple values to the list and wanted only the unique ones to be added, we would specify `PARTIAL` as well.
+
+Aerospike is smart enough to create the list for us if it doesn't already exist, providing the list is at the top level (ie in a bin). If the operation related to a list inside another list or map, we would have had to explicitly call `ListOperation.create(...)` to ensure the list existed __before__ the `append` operation.
 
 Next we add the agent id to the listing, completing the business logic. The transaction is then committed and we're done.
 
@@ -224,4 +227,151 @@ The only difference to what we saw above are that determining if a code is retyr
 
 Let's look at using this transaction functionality in other business methods!
 
-##
+## Getting all the Listings for one Agent
+Given an agent id, we want to find all the listings that agent has. 
+```java
+public List<Listing> getListings(IAerospikeClient client, AeroMapper mapper, long agentId) {
+    Key agentKey = new Key(mapper.getNamespace(Agent.class), mapper.getSet(Agent.class), agentId);
+    return Utils.doInTransaction(client, txn -> {
+        Policy readPolicy = client.copyReadPolicyDefault();
+        readPolicy.txn = txn;
+        // Read just the listing from the agent
+        Record agent = client.get(readPolicy, agentKey, "listings");
+        if (agent != null) {
+            List<String> listingIds = (List<String>) agent.getList("listings");
+            // Turn each Id into a key
+            Key[] keys = listingIds.stream()
+                    .map(listingId -> new Key(mapper.getNamespace(Listing.class), mapper.getSet(Listing.class), listingId))
+                    .toArray(Key[]::new);
+            
+            // Perform a batch read to read all the listing
+            BatchPolicy batchPolicy = client.getBatchPolicyDefault();
+            batchPolicy.txn = txn;
+            Record[] listings = client.get(batchPolicy, keys);
+            
+            List<Listing> results = new ArrayList<>();
+            for (Record thisListing : listings) {
+                if (thisListing != null) {
+                    // Note: This is the raw Aerospike way of doing it. If using an AeroMapper, could use 
+                    // mapper.getMappingConverter().convertToObject(...) 
+                    results.add(new Listing(
+                            thisListing.getString("id"),
+                            thisListing.getString("line1"),
+                            thisListing.getString("line2"),
+                            thisListing.getString("city"),
+                            thisListing.getString("state"),
+                            thisListing.getString("zipCode"),
+                            thisListing.getString("url"),
+                            thisListing.getLong("dateListed") == 0? null : new Date(thisListing.getLong("dateListed")),
+                            thisListing.getLong("agentId"),
+                            thisListing.getString("description")));
+                }
+            }
+            return results;
+        }
+        return List.of();
+    });
+}
+```
+
+This is a two step process:
+1. Query the agent from the agent id. All tht is needed is the listings for the agent so just the bin which contain the listings (`listings`) is returned back to the client.
+2. Each of the returned listings is turned into a primary key for the listing. These keys are then queried in a batch read to load all the listing details. Note that by default batch reads are done sequentially. This is good for small batches, but if there are a large amount of listing, then they could be queried in parallel by setting
+    ```
+    batchPolicy.maxCouncurrentThreads = 0;
+    ```
+    The listings are turned from `Recrod`s into `Listing`s, and an array of them returned.
+
+Note that the reads are done in a transaction. This prevents stale reads of the listings when they're being added or removed to the agent when the read is attempted. In many situation this stale read would not be an issue and the overhead of the transaction could be avoided.
+
+## Adding a listing to an agent
+To create a new listing and associate it with and existing agent, we can use the following:
+```java
+public void addListing(IAerospikeClient client, AeroMapper mapper, long agentId, Listing listing) {
+    // Set the agent id on the listing
+    listing.setAgentId(agentId);
+    
+    // Turn the listing into a series of Aerospike bins. This can be done manually without a mapper.
+    Map<String, Object> valueMap = mapper.getMappingConverter().convertToMap(listing);
+    Bin[] bins = valueMap.entrySet().stream()
+            .map(entry -> new Bin(entry.getKey(), Value.get(entry.getValue())))
+            .toArray(Bin[]::new);
+
+    // Get the keys to use
+    Key agentKey = new Key(mapper.getNamespace(Agent.class), mapper.getSet(Agent.class), agentId);
+    Key listingKey = new Key(mapper.getNamespace(Listing.class), mapper.getSet(Listing.class), listing.getId());
+
+    Utils.doInTransaction(client, txn -> {
+        WritePolicy writePolicy = client.copyWritePolicyDefault();
+        writePolicy.txn = txn;
+        
+        // Save the listing details
+        client.put(writePolicy, listingKey, bins);
+        
+        // Update the agent to incorporate the listing id. Create the list if it doesn't exist. Note that we mimic SET behaviour instead of a list
+        ListPolicy setLikeListPolicy = new ListPolicy(ListOrder.ORDERED, ListWriteFlags.ADD_UNIQUE | ListWriteFlags.NO_FAIL);
+        client.operate(writePolicy, agentKey, 
+                ListOperation.append(setLikeListPolicy, "listings", Value.get(listing.getId())));
+    });
+}
+```
+The first step is to create the bins (columns) to represent the listing. This can be done manually, for example:
+```java
+Bin[] bins = new Bin[] {
+    new Bin("id", listing.get("id")),
+    new Bin("line1", listing.get("line1")),
+    new Bin("line2", listing.get("line2")),
+    ...
+}
+```
+However, for clarity of the important parts of the code, an object mapper was used to turn the `listing` into a map, then stream processing used to turn this into an array of bins.
+
+Then there are two things which need doing:
+1. Inserting the listing as a new record. Note that there is no check as to whether the `Listing` already exists or not. If this was desired, and an error should be thrown if the listing already exists then `writePolicy.recordExistsAction = RecordExistsAction.CREATE_ONLY;` can be set to enforce this.
+2. Add the `listingId` into the list of ids on the `Agent` object. 
+
+These actions need to be in a transaction in case something goes wrong with one of the updates.
+
+## Deleting a listing
+To delete a listing and remove it from the agent, there are three things that need to be done:
+1. Get the agent id from the listing.
+2. Remove the listing from the agent's list.
+3. Remove the listing.
+
+However, given that we're doing this in a transaction we could actually use a more complex operation in Aerospike and make it:
+1. Get the agent id for the listing and remove the listing
+2. Remove the listing from the agent's list.
+
+This is faster (2 database operations instead of 3) and only requires us to use the `operate` command to merge the 2 discrete actions into a single database call:
+
+```java
+public boolean deleteListing(IAerospikeClient client, AeroMapper mapper, String listingId) {
+    Key listingKey = new Key(mapper.getNamespace(Listing.class), mapper.getSet(Listing.class), listingId);
+
+    return Utils.doInTransaction(client, txn -> {
+        WritePolicy writePolicy = client.copyWritePolicyDefault();
+        writePolicy.txn = txn;
+        writePolicy.durableDelete = true;
+        
+        // Get the agentId from the listing and delete the listing
+        try {
+            Record listing = client.operate(writePolicy, listingKey, 
+                    Operation.get("agentId"),
+                    Operation.delete());
+            Key agentKey = new Key(mapper.getNamespace(Agent.class), mapper.getSet(Agent.class), listing.getLong("agentId"));
+            // Remove the listing from the list on the agent
+            Record result = client.operate(writePolicy, agentKey, ListOperation.removeByValue("listings", Value.get(listingId), ListReturnType.EXISTS));
+            return result.getBoolean("listings");
+        }
+        catch (AerospikeException e) {
+            if (e.getResultCode() == ResultCode.KEY_NOT_FOUND_ERROR) {
+                return false;
+            }
+            throw e;
+        }
+    });
+}
+```
+
+This method will return true if the delete was successful, or false otherwise.
+

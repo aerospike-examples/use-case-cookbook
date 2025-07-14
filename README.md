@@ -117,5 +117,8 @@ To allow these demonstrations to be executed by everyone, the system will detect
 
 Note that the namespace can be altered by setting a system property `-Ddemo.namespace=<name>`, but will default to `test`.
 
-## Managing Top level objects in a one-to-many or many-to-many relationships
-Let's say there are two related entities which are associated with one another. For example a Department has Employees, and each Employee belongs to exactly one department. See [Managing One to Many relationships](UseCases/one-to-many-relationships.md)
+## Managing Top level objects in a one-to-many relationship
+Situations where there are two related entities which are associated with one another, with one entity having many instances of the other entity. Both entities have business value in their own right, so one cannot be aggregated (nested) inside the other. For example a Department has Employees, and each Employee belongs to exactly one department. See [Managing One to Many relationships](UseCases/one-to-many-relationships.md)
+
+## Managing Top level objects in a many-to-many relationship
+Situations where there are two related entities which are associated with one another, with each entity having many instances of the other entity. Both entities have business value in their own right. For example a bank Customer can have multiple Accounts, but each Account can be owned by multiple Customers. See [Managing Many to Many relationships](UseCases/many-to-many-relationships.md)

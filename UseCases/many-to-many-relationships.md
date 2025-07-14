@@ -145,4 +145,89 @@ Here you can see that the first customer (`Cust-1`) has 4 accounts. One of those
 (Note: All the test data is randomly generated. Hence you will get different results when running the test harness yourself, but the concepts still apply.)
 
 ## Querying the data model.
-Given that a `Customer` has a list of `Account`s, and an `Account` has a list of `Customer`s, querying either list from a single instance of the other (ie getting the list of `Account`s for a `Customer`, or getting the list of `Customer`s who own an `Account`) is identical to querying 
+Given that a `Customer` has a list of `Account`s, and an `Account` has a list of `Customer`s, querying either list from a single instance of the other (ie getting the list of `Account`s for a `Customer`, or getting the list of `Customer`s who own an `Account`) is identical to querying a one-to-many relationship, so see [how to do this here](one-to-many-relationships.md#getting-all-the-listings-for-one-agent).
+
+Instead, let's play a bit. Suppose we want to find out which `Customer`s are related to a given `Customer`. By related, we mean that they share at least one account. So if we have customer C<sub>1</sub>, we want to find all other customers C<sub>2</sub>, C<sub>3</sub>...C<sub>N</sub> such that C<sub>1</sub> and C<sub>k</sub> are both owners on an account A<sub>x</sub> for any `x`.
+
+The solution is actually fairly easy when power of Aerospike batch reads is used:
+```java
+public Map<String, Integer> getRelatedCustomers(IAerospikeClient client, AeroMapper mapper, String customerId) {
+    Key customerKey = new Key(mapper.getNamespace(Customer.class), mapper.getSet(Customer.class), customerId);
+    String accountNs = mapper.getNamespace(Account.class);
+    String accountSet = mapper.getSet(Account.class);
+    
+    Record record = client.get(null, customerKey, "accounts");
+    if (record != null) {
+        List<String> accountIds = (List<String>) record.getList("accounts");
+        Key[] accountKeys = accountIds.stream()
+                .map(id -> new Key(accountNs, accountSet, id))
+                .toArray(Key[]::new);
+        
+        Record[] records = client.get(null, accountKeys, "owners");
+        
+        // Now use Java streams to process into the map, extracting elements out of the 
+        // lists of each record
+        List<Record> recordList = Arrays.asList(records);
+        Map<String, Integer> counts = recordList.stream()
+                .flatMap(rec -> {
+                    List<String> list = (List<String>) rec.getList("owners");
+                    return list == null ? Stream.empty() : list.stream();
+                })
+                .filter(id -> !customerId.equals(id))
+                .collect(Collectors.groupingBy(
+                        Function.identity(),
+                        Collectors.reducing(0, e->1, Integer::sum)
+                ));
+        
+        return counts;
+    }
+    return Map.of(); 
+}
+```
+
+The customer is queried to get the list of accounts they own. We only need this bin, so we pass `"account"` as the list of bins to return to the `get` call. This minimizes network traffic in case the rest of the object is large.
+
+The `accounts` list contains the accounts ids that this customer owns. Each of those accounts hsa an `owners` bin (a list) which holds the customer ids of the account owners. So performing a batch get of the `owners` bin on all the `accounts` will give us the raw data. 
+
+Once we have this raw data, it's just a matter of extracting the bin, removing the passed id from the list and grouping it by the customer id. A little bit of Java stream magic, and we get our map back! 
+
+Note that in this example we're not using transactions. We're only reading the data, and it's statistical data so if the data changes as it's being read, this might not matter. Typically you would use business logic to determine which parts of your calls (if any) should be transactional. 
+
+## Breaking associations
+Since both Customers and Accounts have business meaning in their own rights, and it would be unusual to actually delete either of these entities due to legal auditing requirements, let's look at breaking the relationship between two entities:
+
+```java
+public void removeAssociation(IAerospikeClient client, AeroMapper mapper, String customerId, String accountId) {
+    Key customerKey = new Key(mapper.getNamespace(Customer.class), mapper.getSet(Customer.class), customerId);
+    Key accountKey = new Key(mapper.getNamespace(Account.class), mapper.getSet(Account.class), accountId);
+    
+    // Remove the customerId from the account object, remove the account id from the customer object
+    Utils.doInTransaction(client, txn -> {
+       WritePolicy writePolicy = client.copyWritePolicyDefault();
+       writePolicy.txn = txn;
+       
+       // Remove the accountid from the customer
+       Record rec = client.operate(writePolicy, customerKey, ListOperation.removeByValue("accounts", Value.get(accountId), ListReturnType.EXISTS));
+       if (rec.getBoolean("accounts")) {
+           // Remove the recordid from the account
+           rec = client.operate(writePolicy, accountKey, ListOperation.removeByValue("owners", Value.get(customerId), ListReturnType.EXISTS));
+           if (!rec.getBoolean("owners")) {
+               
+               throw new IllegalStateException(String.format(
+                       "Account record for key '%s', should contain customer id '%s' in it's owners list, but does not",
+                       accountId, customerId));
+               
+           }
+       }
+       else {
+           throw new IllegalStateException(String.format(
+                   "Customer record for key '%s', should contain account id '%s' in it's account list, but does not",
+                   customerId, accountId));
+       }
+    });
+}
+```
+
+Here we simply perform two operations which are very similar to one another -- removing the id of an enitiy from the list of enities in the other. For example, removing the customer id from the list of customers in the account, and vice versa. To preserve referential integrity we wrap both of these actions inside a transaction.
+
+Note that you might be tempted to do the two operations inside a batch operation. While this would work, it is likely to be slower than doing them sequentially with point writes due to the overhead of starting batches. This is especially true if the batch was to be executed with multiple threads. As the number of operations gets larger the benefit of batches becomes more and more apparent, but for very small numbers of reads or writes like one or two, it is often faster just to do key-value operations.

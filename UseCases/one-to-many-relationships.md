@@ -1,4 +1,5 @@
 # Managing One to Many relationships
+[Link to working code](../source/src/main/java/com/aerospike/examples/onetomany/OneToManyRelationships.java)
 There are many situations where one entity is related to many instances of another sort of entity. Both parent and children may need to be accessed directly, without starting from the other entity, and hence are related via association and not aggregation. 
 
 Examples of associated relationships include:

@@ -122,3 +122,10 @@ Situations where there are two related entities which are associated with one an
 
 ## Managing Top level objects in a many-to-many relationship
 Situations where there are two related entities which are associated with one another, with each entity having many instances of the other entity. Both entities have business value in their own right. For example a bank Customer can have multiple Accounts, but each Account can be owned by multiple Customers. See [Managing Many to Many relationships](UseCases/many-to-many-relationships.md)
+
+## Leaderboards
+Competitive gamers want to have games which are challenging but winnable, and want to know where the stand compared to other players. They aslo want to feel like they're progressing in the game. These criteria need leaderboards to work successfully, and being able to do these at scale with millions or tens of millions of players, playing thousands of games a second creates significant challenges. See [Leaderboards](UseCases/leaderboard.md)
+
+## Player Matching
+Related to leaderboards is the ability to have players matching against similar level opponents with various criteria based on the game. We need to match opponents at scale, efficiently. See [Player Matching](UseCases/player-matching.md)
+

@@ -1,6 +1,5 @@
 package com.aerospike.examples;
 
-import java.io.IOError;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
@@ -14,6 +13,8 @@ import com.aerospike.client.Host;
 import com.aerospike.client.IAerospikeClient;
 import com.aerospike.client.Info;
 import com.aerospike.client.cluster.Node;
+import com.aerospike.examples.gaming.Leaderboard;
+import com.aerospike.examples.gaming.PlayerMatching;
 import com.aerospike.examples.manytomany.ManyToManyRelationships;
 import com.aerospike.examples.onetomany.OneToManyRelationships;
 import com.aerospike.examples.setup.SetupDemo;
@@ -21,7 +22,9 @@ import com.aerospike.mapper.tools.AeroMapper;
 
 public class Runner {
     
+    @SuppressWarnings("serial")
     public static class MissingNamespaceException extends RuntimeException {}
+    
     /**
      * A list of the use cases known about by this system. To add a new use case to the menu
      * and enable it to be executed, simply add it to this list. The order in the menu will 
@@ -30,7 +33,9 @@ public class Runner {
     private final List<UseCase> useCases = List.of(
             new SetupDemo(),
             new OneToManyRelationships(),
-            new ManyToManyRelationships()
+            new ManyToManyRelationships(),
+            new Leaderboard(),
+            new PlayerMatching()
     );
     
     /** The Aerospike client to use for the demonstration */
@@ -116,6 +121,7 @@ public class Runner {
 
     /**
      * Wraps a long string to fit within a specified width, preserving word boundaries.
+     * Also handles newlines in the text by treating them as forced line breaks.
      *
      * @param text  the text to wrap
      * @param width the maximum width per line
@@ -123,19 +129,31 @@ public class Runner {
      */
     private List<String> wrapText(String text, int width) {
         List<String> lines = new ArrayList<>();
-        String[] words = text.split(" ");
-        StringBuilder line = new StringBuilder();
-
-        for (String word : words) {
-            if (line.length() + word.length() + 1 > width) {
-                lines.add(line.toString());
-                line = new StringBuilder();
+        
+        // First split by newlines to handle forced line breaks
+        String[] paragraphs = text.split("\n");
+        
+        for (String paragraph : paragraphs) {
+            // Skip empty paragraphs (consecutive newlines)
+            if (paragraph.trim().isEmpty()) {
+                continue;
             }
-            if (line.length() > 0) line.append(" ");
-            line.append(word);
-        }
-        if (line.length() > 0) {
-            lines.add(line.toString());
+            
+            // Apply word wrapping to each paragraph
+            String[] words = paragraph.split(" ");
+            StringBuilder line = new StringBuilder();
+
+            for (String word : words) {
+                if (line.length() + word.length() + 1 > width) {
+                    lines.add(line.toString());
+                    line = new StringBuilder();
+                }
+                if (line.length() > 0) line.append(" ");
+                line.append(word);
+            }
+            if (line.length() > 0) {
+                lines.add(line.toString());
+            }
         }
 
         return lines;

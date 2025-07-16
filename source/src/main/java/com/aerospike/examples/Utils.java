@@ -51,53 +51,74 @@ public class Utils {
     }
 
     public static <T> T doInTransaction(IAerospikeClient client, Transactional<T> operation) {
-        while (true) {
-            Txn txn = new Txn();
-            try {
-                T result = operation.execute(txn);
-                client.commit(txn);
-                return result;
-            }
-            catch (AerospikeException ae) {
-                client.abort(txn);
-                if (isRetryableResultCode(ae.getResultCode())) {
-                    // These can be retried from the beginning
-                    sleep(1,5);
+        return doInTransaction(client, null, operation);
+    }
+    
+    public static <T> T doInTransaction(IAerospikeClient client, Txn existingTxn, Transactional<T> operation) {
+        if (existingTxn != null) {
+            // Wrapping transaction will take care of all commit / abort / retry logic.
+            return operation.execute(existingTxn);
+        }
+        else {
+            while (true) {
+                Txn txn = new Txn();
+                try {
+                    T result = operation.execute(txn);
+                    client.commit(txn);
+                    return result;
                 }
-                else {
-                    // These cannot be retried
-                    throw ae;
+                catch (AerospikeException ae) {
+                    client.abort(txn);
+                    if (isRetryableResultCode(ae.getResultCode())) {
+                        // These can be retried from the beginning
+                        sleep(1,5);
+                    }
+                    else {
+                        // These cannot be retried
+                        throw ae;
+                    }
                 }
-            }
-            catch (Exception e) {
-                client.abort(txn);
-                throw e;
+                catch (Exception e) {
+                    client.abort(txn);
+                    throw e;
+                }
             }
         }
     }
-    
+
     public static void doInTransaction(IAerospikeClient client, TransactionalVoid operation) {
-        while (true) {
-            Txn txn = new Txn();
-            try {
-                operation.execute(txn);
-                client.commit(txn);
-                break;
-            }
-            catch (AerospikeException ae) {
-                client.abort(txn);
-                if (isRetryableResultCode(ae.getResultCode())) {
-                    // These can be retried from the beginning
-                    sleep(1,5);
+        doInTransaction(client, null, operation);
+    }
+    
+    public static void doInTransaction(IAerospikeClient client, Txn existingTxn, TransactionalVoid operation) {
+        if (existingTxn != null) {
+            // Wrapping transaction will take care of all commit / abort / retry logic.
+            operation.execute(existingTxn);
+        }
+        else {
+            while (true) {
+                Txn txn = new Txn();
+                try {
+                    operation.execute(txn);
+                    client.commit(txn);
+                    break;
                 }
-                else {
-                    // These cannot be retried
-                    throw ae;
+                catch (AerospikeException ae) {
+                    client.abort(txn);
+                    if (isRetryableResultCode(ae.getResultCode())) {
+                        // These can be retried from the beginning
+                        sleep(1,5);
+                    }
+                    else {
+                        // These cannot be retried
+                        throw ae;
+                    }
                 }
-            }
-            catch (Exception e) {
-                client.abort(txn);
-                throw e;
+                catch (Exception e) {
+                    client.abort(txn);
+                    throw e;
+                }
             }
         }
-    }}
+    }
+}

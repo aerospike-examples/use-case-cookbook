@@ -115,7 +115,14 @@ Utils.doInTransaction(client, txn -> {
 The attacker loses their shield when the attack and if the defender was defeated they gain a shield for a period of time. When the defending player was selected the flag "beingAttackedBy" was set to the id of the attacker and the filter criteria uses this to prevent multiple attackers attacking the same defender concurrently. This flag must be cleared when the battle is over.
 
 ## Running the simulation
-Running the simulation uses the `Async`
+Running the simulation uses the `Async` methods as described [here](leaderboard.md#running-the-demonstration). There are only two types of tasks we want to start off this time though:
+
+1. Controlling the player we want to monitor (player1). We will montitor their attacks and results, and show their position on the leaderboard prior to starting and after running the use case. In order to ensure that no-one matches this player, we will set them to be online before the other threads start, and only take them offline when the simulation ends. (Remember that online players cannot be attacked in this use case).
+
+2. Simulating other players attacking. This is done just to put some load on the database, and we can control the number of threads and how frequently they attack. When a player is selected to attack, they are set to be online, thus preventing them from being attacked. When the attack is over, they are set to be offline again.
+
+    Note that one area the simulation doesn't cater for is determining what happens when a player comes online while they are being attacked. Games like "Clash of Clans" handle this scenario by allowing the player to watch the attacks occurring on their bases like, a visually appealing feature for the players, as well as providing a nice solution for how to handle this case. 
+
 ```java
 Player player1 = setPlayerOnline(client, 1, true);
 System.out.printf("Leader board before the games start...\n");
@@ -149,5 +156,3 @@ System.out.printf("Leader board after the games end...\n");
 leaderboard.showPlayersAroundPlayer(client, player1.getId(), player1.getScore());
 setPlayerOnline(client, player1.getId(), false);
 ```
-
-We also need to make sure that player 

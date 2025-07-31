@@ -63,6 +63,11 @@ public class Leaderboard implements UseCase {
                 + "per thread.",
                 PLAYER1_UPDATE_PERIOD, SCOREBOARD_DISPLAY_PERIOD, NUM_THREADS, THREAD_UPDATE_PERIOD);
     }
+    
+    @Override
+    public String getReference() {
+        return "https://github.com/aerospike-examples/use-case-cookbook/blob/main/UseCases/leaderboard.md";
+    }
 
     public void setDefaultValues(AeroMapper mapper) {
         this.playerNamespace = mapper.getNamespace(Player.class);

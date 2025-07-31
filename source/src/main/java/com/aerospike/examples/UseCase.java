@@ -6,6 +6,7 @@ import com.aerospike.mapper.tools.AeroMapper;
 public interface UseCase {
     String getName();
     String getDescription();
+    String getReference();
     void setup(IAerospikeClient client, AeroMapper mapper) throws Exception;
     void run(IAerospikeClient client, AeroMapper mapper) throws Exception;
 }

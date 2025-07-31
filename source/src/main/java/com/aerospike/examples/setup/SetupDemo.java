@@ -21,7 +21,13 @@ public class SetupDemo implements UseCase {
     public String getDescription() {
         return "First application to make sure your environment is set up correctly. Inserts some Accounts and reads the data back";
     }
+    
 
+    @Override
+    public String getReference() {
+        return "https://github.com/aerospike-examples/use-case-cookbook/blob/main/UseCases/setup.md";
+    }
+    
     @Override
     public void setup(IAerospikeClient client, AeroMapper mapper) throws Exception {
         client.truncate(null, mapper.getNamespace(Account.class), mapper.getSet(Account.class), null);

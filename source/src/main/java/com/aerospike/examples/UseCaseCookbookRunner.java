@@ -18,9 +18,10 @@ import com.aerospike.examples.gaming.PlayerMatching;
 import com.aerospike.examples.manytomany.ManyToManyRelationships;
 import com.aerospike.examples.onetomany.OneToManyRelationships;
 import com.aerospike.examples.setup.SetupDemo;
+import com.aerospike.examples.timeseries.TimeSeriesDemo;
 import com.aerospike.mapper.tools.AeroMapper;
 
-public class Runner {
+public class UseCaseCookbookRunner {
     
     @SuppressWarnings("serial")
     public static class MissingNamespaceException extends RuntimeException {}
@@ -35,7 +36,8 @@ public class Runner {
             new OneToManyRelationships(),
             new ManyToManyRelationships(),
             new Leaderboard(),
-            new PlayerMatching()
+            new PlayerMatching(),
+            new TimeSeriesDemo()
     );
     
     /** The Aerospike client to use for the demonstration */
@@ -44,7 +46,7 @@ public class Runner {
     /** The mapper to use to perform repetitive tasks */
     private final AeroMapper mapper;
     
-    public Runner(IAerospikeClient client, AeroMapper mapper) {
+    public UseCaseCookbookRunner(IAerospikeClient client, AeroMapper mapper) {
         this.client = client;
         this.mapper = mapper;
     }
@@ -134,31 +136,37 @@ public class Runner {
         String[] paragraphs = text.split("\n");
         
         for (String paragraph : paragraphs) {
-            // Skip empty paragraphs (consecutive newlines)
-            if (paragraph.trim().isEmpty()) {
-                continue;
-            }
-            
+
             // Apply word wrapping to each paragraph
             String[] words = paragraph.split(" ");
-            StringBuilder line = new StringBuilder();
-
-            for (String word : words) {
-                if (line.length() + word.length() + 1 > width) {
-                    lines.add(line.toString());
-                    line = new StringBuilder();
-                }
-                if (line.length() > 0) line.append(" ");
-                line.append(word);
+            
+            if (words.length == 0) {
+                // Add a blank line
+                lines.add("");
             }
-            if (line.length() > 0) {
-                lines.add(line.toString());
+                else {
+                StringBuilder line = new StringBuilder();
+    
+                for (String word : words) {
+                    if (line.length() + word.length() + 1 > width) {
+                        lines.add(line.toString());
+                        line = new StringBuilder();
+                    }
+                    if (line.length() > 0) line.append(" ");
+                    line.append(word);
+                }
+                if (line.length() > 0) {
+                    lines.add(line.toString());
+                }
             }
         }
 
         return lines;
     }
     
+    public String formUseCaseText(UseCase uc) {
+        return uc.getDescription() + "\n \nSee: " + uc.getReference();
+    }
     /**
      * Displays the table of use cases in a formatted layout using ANSI colors.
      *
@@ -194,27 +202,32 @@ public class Runner {
             UseCase uc = useCases.get(i);
             String index = padLeft(String.valueOf(i + 1), indexWidth);
             String name = padRight(truncate(uc.getName(), nameWidth), nameWidth);
-            List<String> wrappedDesc = wrapText(uc.getDescription(), descWidth);
+            List<String> wrappedDesc = wrapText(formUseCaseText(uc), descWidth);
 
-            String color = (i % 2 == 0) ? "\033[34m" : "\033[32m"; // blue and green alternating
+            String color = (i % 2 == 0) ? "\033[35m" : "\033[32m"; // blue and green alternating
 
             for (int j = 0; j < wrappedDesc.size(); j++) {
                 String descLine = padRight(wrappedDesc.get(j), descWidth);
                 if (j == 0) {
-                    System.out.printf("%s| %s | %s | %s |\033[0m%n", color, index, name, descLine);
+                    System.out.printf("%s| %s | \033[1m%s\033[0m%s | %s |\033[0m%n", color, index, name, color, descLine);
                 } else {
-                    System.out.printf("%s| %s | %s | %s |\033[0m%n",
+                    System.out.printf("%s| %s | \033[1m%s\033[0m%s | %s |\033[0m%n",
                             color,
                             padLeft("", indexWidth),
                             padRight("", nameWidth),
+                            color,
                             descLine);
                 }
             }
+            System.out.println(horizontalLine);
         }
 
-        System.out.println(horizontalLine);
     }
     
+    public void showStartHeader() {
+        System.out.println("Here are the use cases in this repository:");
+        System.out.println("Use \033[1mCommand+Click\033[0m or \033[1mControl+Click\033[0m to open hyperlinks in most modern terminals.");
+    }
     /**
      * Runs the interactive use case menu.
      * Displays the table and prompts the user to select a use case by number.
@@ -226,6 +239,7 @@ public class Runner {
         try (Scanner scanner = new Scanner(System.in)) {
 
             while (true) {
+                showStartHeader();
                 showUseCaseDetails(length);
                 System.out.print("Enter a use case number (1 to " + useCases.size() + ", or 0 to exit): ");
                 String input = scanner.nextLine().trim();
@@ -333,9 +347,9 @@ public class Runner {
     
     private static void showClusterWarning() {
         String namespace = System.getProperty("demo.namespace", "test");
-        System.out.println("*************");
+        System.out.println("\033[31m\033[1m*************");
         System.out.println("*  WARNING  *");
-        System.out.println("*************");
+        System.out.println("*************\033[0m");
         System.out.println("Some of the demonstrations in this program require transaction support. "
                 + "Transactions require Aerospike version 8+ and the namespace ('"+namespace+"') must be "
                 + "configured to support strong consistency (an enterprise edition enhancement). "
@@ -365,7 +379,7 @@ public class Runner {
                 clientToUse = client;
             }
             AeroMapper mapper = new AeroMapper.Builder(clientToUse).build();
-            Runner runner = new Runner(clientToUse, mapper);
+            UseCaseCookbookRunner runner = new UseCaseCookbookRunner(clientToUse, mapper);
             Terminal terminal = TerminalBuilder.terminal();
             int width = terminal.getWidth();
             if (width == 0) {

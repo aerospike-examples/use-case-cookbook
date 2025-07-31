@@ -4,7 +4,6 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
-import java.util.Optional;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -44,8 +43,12 @@ public class ManyToManyRelationships implements UseCase{
     @Override
     public String getDescription() {
         return "Demonstrate how to handle manu-to-many relationships in Aerospike. Traversing relationships in both directions and adding "
-                + "entites are discussed. See "
-                + "https://github.com/aerospike-examples/use-case-cookbook/blob/main/UseCases/many -to-many-relationships.md for details";
+                + "entites are discussed.";
+    }
+    
+    @Override
+    public String getReference() {
+        return "https://github.com/aerospike-examples/use-case-cookbook/blob/main/UseCases/many-to-many-relationships.md";
     }
 
     @Override

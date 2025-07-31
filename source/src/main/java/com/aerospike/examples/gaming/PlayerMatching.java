@@ -47,6 +47,11 @@ public class PlayerMatching implements UseCase {
     }
 
     @Override
+    public String getReference() {
+        return "https://github.com/aerospike-examples/use-case-cookbook/blob/main/UseCases/player-matching.md";
+    }
+
+    @Override
     public String getDescription() {
         return "Find players that match certain criteria at scale. Players play the game concurrently, but in order "
                 + "to attack they need to match against another player. The player cannot be online in this example "
@@ -54,7 +59,7 @@ public class PlayerMatching implements UseCase {
                 + "1. Is not online\n"
                 + "2. Who does not have a shield\n"
                 + "3. Who is not currently being attacked\n"
-                + "4. Whose score is >= 400"
+                + "4. Whose score is >= 400\n"
                 + "5. Whose score is similar to this player\n "
                 + "A shield is given to a player when they have been attacked and defeated. These would normally be a decent length "
                 + "to stop them being attacked too often, but in this example will only be for 5s. Attackers defeat "

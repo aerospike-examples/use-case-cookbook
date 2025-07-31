@@ -48,8 +48,12 @@ public class OneToManyRelationships implements UseCase {
     @Override
     public String getDescription() {
         return "Demonstrate how to handle one-to-many relationships in Aerospike. Both being "
-                + "able to query only from the parent to the child, and being able to query from the child to the parent as well, are discussed. See "
-                + "https://github.com/aerospike-examples/use-case-cookbook/blob/main/UseCases/one-to-many-relationships.md for details";
+                + "able to query only from the parent to the child, and being able to query from the child to the parent as well, are discussed.";
+    }
+
+    @Override
+    public String getReference() {
+        return "https://github.com/aerospike-examples/use-case-cookbook/blob/main/UseCases/one-to-many-relationships.md";
     }
 
     /**

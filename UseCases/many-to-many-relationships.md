@@ -1,4 +1,6 @@
 # Managing Many to Many relationships
+[Back to all use cases](../README.md)
+
 [Link to working code](../source/src/main/java/com/aerospike/examples/manytomany/ManyToManyRelationships.java)
 
 There are many situations where groups of two different entities are related together. Consider a banking scenario -- a customer might own multiple accounts, and each of those accounts might be owned by multiple people. In SQL this sort of data model would require a join table to resolve the many-to-many relationship, as well as potentially a couple of indexes for efficient retrieval.

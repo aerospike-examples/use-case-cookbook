@@ -1,4 +1,6 @@
 # Time series data
+[Back to all use cases](../README.md)
+
 [Link to working code](../source/src/main/java/com/aerospike/examples/timeseries/TimeSeriesDemo.java)
 
 ## Use case

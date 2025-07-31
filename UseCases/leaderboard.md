@@ -1,4 +1,6 @@
 # Leaderboards
+[Back to all use cases](../README.md)
+
 [Link to working code](../source/src/main/java/com/aerospike/examples/gaming/Leaderboard.java)
 
 In gaming environments it's quite common to maintin leaderboards -- lists of players who have achieved high scores as well as the scores for the players. Each player has a current score or a best score (depending on the game). As they play the game more, the score is updated as is their position on the leaderboard.

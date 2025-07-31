@@ -129,3 +129,6 @@ Competitive gamers want to have games which are challenging but winnable, and wa
 ## Player Matching
 Related to leaderboards is the ability to have players matching against similar level opponents with various criteria based on the game. We need to match opponents at scale, efficiently. See [Player Matching](UseCases/player-matching.md)
 
+## Time Series Data
+Inserting, updating and querying time-series data is very important in range of industries. From monitoring dashboards, to credit card swipes, to motion detects, many use cases have this requirement. See [Time Series](UseCases/timeseries.md)
+

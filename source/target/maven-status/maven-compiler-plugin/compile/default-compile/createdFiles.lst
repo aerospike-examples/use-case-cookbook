@@ -26,3 +26,4 @@ com/aerospike/examples/gaming/model/Player.class
 com/aerospike/examples/timeseries/TimeSeriesDemo.class
 com/aerospike/examples/manytomany/ManyToManyRelationships.class
 com/aerospike/examples/Async.class
+com/aerospike/examples/realtimebidding/RealTimeBiddingDemo.class

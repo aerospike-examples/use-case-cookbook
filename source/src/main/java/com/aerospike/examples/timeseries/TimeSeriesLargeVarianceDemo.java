@@ -1,6 +1,8 @@
 package com.aerospike.examples.timeseries;
 
 import java.time.LocalDate;
+import java.util.AbstractMap.SimpleEntry;
+import java.util.AbstractMap;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Date;
@@ -14,11 +16,15 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
 
 import com.aerospike.client.AerospikeClient;
+import com.aerospike.client.Bin;
 import com.aerospike.client.IAerospikeClient;
 import com.aerospike.client.Key;
 import com.aerospike.client.Operation;
 import com.aerospike.client.Record;
 import com.aerospike.client.Value;
+import com.aerospike.client.cdt.ListOperation;
+import com.aerospike.client.cdt.ListOrder;
+import com.aerospike.client.cdt.ListReturnType;
 import com.aerospike.client.cdt.MapOperation;
 import com.aerospike.client.cdt.MapOrder;
 import com.aerospike.client.cdt.MapPolicy;
@@ -27,12 +33,15 @@ import com.aerospike.client.cdt.MapWriteFlags;
 import com.aerospike.client.exp.Exp;
 import com.aerospike.client.exp.ExpOperation;
 import com.aerospike.client.exp.ExpReadFlags;
+import com.aerospike.client.exp.ExpWriteFlags;
+import com.aerospike.client.exp.ListExp;
 import com.aerospike.client.exp.MapExp;
 import com.aerospike.client.policy.BatchPolicy;
 import com.aerospike.client.policy.ClientPolicy;
 import com.aerospike.client.policy.Policy;
 import com.aerospike.client.policy.WritePolicy;
 import com.aerospike.examples.UseCase;
+import com.aerospike.examples.Utils;
 import com.aerospike.examples.timeseries.model.Account;
 import com.aerospike.examples.timeseries.model.Event;
 import com.aerospike.generator.Generator;
@@ -57,7 +66,7 @@ import com.aerospike.mapper.tools.AeroMapper;
  * </ul>
  * 
  */
-public class TimeSeriesDemo implements UseCase, AutoCloseable {
+public class TimeSeriesLargeVarianceDemo implements UseCase, AutoCloseable {
     
     // ============================================================================
     // CONSTANTS AND CONFIGURATION
@@ -74,6 +83,9 @@ public class TimeSeriesDemo implements UseCase, AutoCloseable {
         public static String NAMESPACE = "test";
         public static String EVENT_SET = "events";
         public static final String BIN_NAME = "map";
+        public static final String CONTINUATION_BIN = "cont";
+        public static final int MAX_RECORDS_PER_BUCKET = 10;
+        public static final int PERCENT_EVENTS_IN_ORIG_BUCKET = 90;
         public static final String HOST = "localhost";
         public static final int PORT = 3100;
         
@@ -95,9 +107,9 @@ public class TimeSeriesDemo implements UseCase, AutoCloseable {
     
     /** Data generation configuration */
     public static final class GenerationConfig {
-        public static final int NUM_ACCOUNTS = 10;
+        public static final int NUM_ACCOUNTS = 100;
         public static final int MAX_DEVICES_PER_ACCOUNT = 8;
-        public static final int MAX_EVENTS_PER_DEVICE = 800;
+        public static final int MAX_EVENTS_PER_DEVICE = 20;
         public static final String DEFAULT_VIDEO_URL = "https://somewhere.com/4659278373492";
         public static final String DEFAULT_STORAGE_LOCATION = "hv";
         
@@ -119,7 +131,7 @@ public class TimeSeriesDemo implements UseCase, AutoCloseable {
     /**
      * Creates a new Runner instance with the specified Aerospike client.
      */
-    public TimeSeriesDemo() {
+    public TimeSeriesLargeVarianceDemo() {
         this.mapPolicy = new MapPolicy(MapOrder.KEY_ORDERED, MapWriteFlags.DEFAULT);
         this.eventCreator = new ValueCreator<>(Event.class);
     }
@@ -129,14 +141,14 @@ public class TimeSeriesDemo implements UseCase, AutoCloseable {
      * 
      * @return A configured Runner instance
      */
-    public static TimeSeriesDemo createWithDefaultClient() {
+    public static TimeSeriesLargeVarianceDemo createWithDefaultClient() {
         ClientPolicy clientPolicy = createDefaultClientPolicy();
         IAerospikeClient client = new AerospikeClient(clientPolicy, DatabaseConfig.HOST, DatabaseConfig.PORT);
         AeroMapper mapper = new AeroMapper.Builder(client).build();
-        return new TimeSeriesDemo().setClient(client, mapper);
+        return new TimeSeriesLargeVarianceDemo().setClient(client, mapper);
     }
 
-    public TimeSeriesDemo setClient(IAerospikeClient client, AeroMapper mapper) {
+    public TimeSeriesLargeVarianceDemo setClient(IAerospikeClient client, AeroMapper mapper) {
         this.client = client;
         DatabaseConfig.NAMESPACE = mapper.getNamespace(Event.class);
         DatabaseConfig.EVENT_SET = mapper.getSet(Event.class);
@@ -144,7 +156,7 @@ public class TimeSeriesDemo implements UseCase, AutoCloseable {
     }
     @Override
     public String getName() {
-        return "Ingest and query time-series data";
+        return "Time-series data for data with a large variation";
     }
 
     @Override
@@ -194,6 +206,19 @@ public class TimeSeriesDemo implements UseCase, AutoCloseable {
      */
     public static long getBucketOffset(long timestamp) {
         return (timestamp - TimeConfig.DATE_OFFSET_MILLIS) / (TimeConfig.MILLIS_PER_HOUR * TimeConfig.BUCKET_WIDTH_HOURS);
+    }
+    
+    /**
+     * Calculates the lowest possible timestamp for a given bucket.
+     * This is the inverse of getBucketOffset - it takes a bucket number and returns
+     * the timestamp of the start of that bucket.
+     * 
+     * @param bucket - The bucket number
+     * @return The lowest possible timestamp in milliseconds for that bucket
+     */
+    public static String getLowestPossibleEventForBucket(long bucket) {
+        long lowestTimeStamp = TimeConfig.DATE_OFFSET_MILLIS + (bucket * TimeConfig.MILLIS_PER_HOUR * TimeConfig.BUCKET_WIDTH_HOURS);
+        return eventIdFromTimestamp(lowestTimeStamp, true);
     }
     
     /**
@@ -308,12 +333,14 @@ public class TimeSeriesDemo implements UseCase, AutoCloseable {
             "id", event.getId(),
             "accountId", event.getAccountId(),
             "deviceId", event.getDeviceId(),
+            /*
             "params", event.getParameters(),
             "resolution", event.getResolution(),
             "videoMeta", event.getVideoMeta(),
             "paramTags", event.getParameterTags(),
             "partnerId", event.getPartnerId(),
             "partStateId", event.getPartnerStateId(),
+            */
             "timestamp", dateToLong(event.getTimestamp())
         );
     }
@@ -335,12 +362,14 @@ public class TimeSeriesDemo implements UseCase, AutoCloseable {
         event.setId((String) eventMap.get("id"));
         event.setAccountId((String) eventMap.get("accountId"));
         event.setDeviceId((String) eventMap.get("deviceId"));
+        /*
         event.setParameters((Map) eventMap.get("params"));
         event.setResolution((List) eventMap.get("resolution"));
         event.setVideoMeta((Map) eventMap.get("videoMeta"));
         event.setParameterTags((List) eventMap.get("paramTags"));
         event.setPartnerId((String) eventMap.get("partnerId"));
         event.setPartnerStateId((String) eventMap.get("partStateId"));
+        */
         event.setTimestamp(longToDate((Long) eventMap.get("timestamp")));
         
         return event;
@@ -349,6 +378,14 @@ public class TimeSeriesDemo implements UseCase, AutoCloseable {
     // ============================================================================
     // DATABASE OPERATIONS
     // ============================================================================
+    
+    public Exp getDoesContinuationBlockExistExp() {
+        return Exp.binExists(DatabaseConfig.CONTINUATION_BIN);
+    }
+    
+    private Key getContinuationKeyFromKey(Key key, String subKey) {
+        return new Key(key.namespace, key.setName, key.userKey.toString() + "-" + subKey);
+    }
     
     /**
      * Inserts or updates an event in the database.
@@ -372,12 +409,227 @@ public class TimeSeriesDemo implements UseCase, AutoCloseable {
         else {
             writePolicy.expiration = -2; // Do not alter TTL
         }
-        client.operate(writePolicy, key, 
-            MapOperation.put(mapPolicy, DatabaseConfig.BIN_NAME, 
-                Value.get(event.getId()), 
-                Value.get(List.of(event.getDeviceId(), convertEventToMap(event)))
-            )
+        
+
+        // There are 3 distinct case:
+        // 1. The record only has a root block and this event will not make it overflow
+        // 2. The record only has a root block and this event will make it overflow
+        // 3. The root block has already split
+        Exp canWriteToRootBlock = Exp.and(
+                Exp.not(
+                        getDoesContinuationBlockExistExp()
+                ),
+                Exp.lt(
+                        MapExp.size(Exp.mapBin(DatabaseConfig.BIN_NAME)),
+                        Exp.val(DatabaseConfig.MAX_RECORDS_PER_BUCKET)
+                )
         );
+        
+        writePolicy.failOnFilteredOut = false;
+        writePolicy.filterExp = Exp.build(canWriteToRootBlock);
+        
+        Record record = client.operate(writePolicy, key, 
+                MapOperation.put(mapPolicy, DatabaseConfig.BIN_NAME, 
+                    Value.get(event.getId()), 
+                    Value.get(List.of(event.getDeviceId(), convertEventToMap(event)))
+                )
+            );
+        
+        if (record == null) {
+            splitRootBlock(event, key);
+        }
+    }
+    
+    private void splitEventsIntoLists(Record record, List<Entry<String, List<?>>> majorityEvents, List<Entry<String, List<?>>> minorityEvents) {
+        List<Entry<String, List<?>>> list = (List<Entry<String, List<?>>>) record.getList(DatabaseConfig.BIN_NAME);
+        int threshold = list.size() * DatabaseConfig.PERCENT_EVENTS_IN_ORIG_BUCKET / 100;
+        for (int i = 0; i < list.size(); i++) {
+            if (i < threshold) {
+                majorityEvents.add(list.get(i));
+            }
+            else {
+                minorityEvents.add(list.get(i));
+            }
+        }
+    }
+    
+    /**
+     * This method is called when the root block overflows. In this case we need to:
+     * <ol>
+     * <li>Get all the entries from the root block</li>
+     * <li>Write the continuation map with 2 entries: 
+     * <ul>
+     * <li>The smallest possible value for this block
+     * <li>The next block, split at the
+     * </ul>
+     * <li>Write the records </li>
+     * </ol>
+     * Note that we need to validate that the block has not already split as part of the
+     * transaction to prevent race conditions.
+     * @param writePolicy
+     * @param event
+     */
+    private void splitRootBlock(Event event, Key key) {
+        Utils.doInTransaction(client, txn -> {
+            WritePolicy writePolicy = client.copyWritePolicyDefault();
+            writePolicy.txn = txn;
+            Record record = client.operate(writePolicy, key, 
+                    // Operation.get(DatabaseConfig.BIN_NAME),
+                    MapOperation.getByIndexRange(DatabaseConfig.BIN_NAME, 0, MapReturnType.KEY_VALUE),
+                    ExpOperation.read("index", Exp.build(
+                        Exp.cond(getDoesContinuationBlockExistExp(),
+                            ListExp.getByValueRelativeRankRange(ListReturnType.VALUE, 
+                                Exp.val(event.getId()), 
+                                Exp.val(-1),
+                                Exp.val(2),
+                                Exp.listBin(DatabaseConfig.CONTINUATION_BIN)),
+                            Exp.val(List.of(""))
+                        )
+                    )
+                    , ExpReadFlags.DEFAULT));
+            
+            
+            List<String> items = ((List<String>)record.getList("index"));
+            String index = items.get(0);
+            if (index.isEmpty()) {
+                // Split this bin
+                List<Entry<String, List<?>>> majorityEvents = new ArrayList<>();
+                List<Entry<String, List<?>>> minorityEvents = new ArrayList<>();
+                splitEventsIntoLists(record, majorityEvents, minorityEvents);
+                
+                long timestamp = event.getTimestamp().getTime();
+                long bucket = getBucketOffset(timestamp);
+                
+                String minorityEventId = minorityEvents.get(0).getKey();
+                String majorityEventId = getLowestPossibleEventForBucket(bucket);
+                
+                Key minorityKey = getContinuationKeyFromKey(key, minorityEventId);
+                Key majorityKey = getContinuationKeyFromKey(key, majorityEventId);
+                
+                // Remove the data from the root block and populate the map
+                String binName = DatabaseConfig.CONTINUATION_BIN;
+                client.operate(writePolicy, key, 
+                        //Operation.put(Bin.asNull(DatabaseConfig.BIN_NAME)),
+                        MapOperation.clear(DatabaseConfig.BIN_NAME),
+                        ListOperation.create(binName, ListOrder.ORDERED, true),
+                        ListOperation.append(binName, Value.get(minorityEventId)),
+                        ListOperation.append(binName, Value.get(majorityEventId)));
+                
+                // Write the events
+                writePolicy.expiration = record.getTimeToLive();
+                client.operate(writePolicy, minorityKey, 
+                        Operation.put(new Bin(DatabaseConfig.BIN_NAME, minorityEvents, MapOrder.KEY_ORDERED)),
+                        MapOperation.put(mapPolicy, DatabaseConfig.BIN_NAME, 
+                                Value.get(event.getId()), 
+                                Value.get(List.of(event.getDeviceId(), convertEventToMap(event)))));
+                client.put(writePolicy, majorityKey, new Bin(DatabaseConfig.BIN_NAME, majorityEvents, MapOrder.KEY_ORDERED));
+            }
+            else {
+                if (items.size() > 1) {
+                    // Find the biggest element in the list less than or equal to our id.
+                    for (int i = items.size() -1; i >= 0; i--) {
+                        if (items.get(i).compareTo(event.getId()) <= 0) {
+                            index = items.get(i);
+                            break;
+                        }
+                    }
+                }
+                splitExists(writePolicy, event, key, index);
+            }
+            
+        });
+    }
+    
+    private void splitExists(WritePolicy writePolicy, Event event, Key baseKey, String index) {
+        // Insert the item into the record 
+        Key splitKey = getContinuationKeyFromKey(baseKey, index);
+        int minorSplitItems = DatabaseConfig.MAX_RECORDS_PER_BUCKET * (100 - DatabaseConfig.PERCENT_EVENTS_IN_ORIG_BUCKET) / 100;
+
+        Exp willEventMakeBinOverlow = Exp.ge(
+                MapExp.size(Exp.mapBin(DatabaseConfig.BIN_NAME)),
+                Exp.val(DatabaseConfig.MAX_RECORDS_PER_BUCKET)
+            );
+ 
+        Operation readMinorityEvents = ExpOperation.read("minority", Exp.build(
+                    Exp.cond(
+                        willEventMakeBinOverlow,
+                        // This record will cause overflow, it must be split
+                        MapExp.getByIndexRange(
+                                MapReturnType.ORDERED_MAP, 
+                                Exp.val(-minorSplitItems), 
+                                Exp.mapBin(DatabaseConfig.BIN_NAME)),
+                        
+                        // This record will not cause overflow, return empty
+                        Exp.val(Map.of())
+                    )
+                ),
+                ExpReadFlags.DEFAULT);
+        
+        Operation removeMinorityEvents = ExpOperation.write(DatabaseConfig.BIN_NAME, Exp.build(
+                Exp.cond(
+                    willEventMakeBinOverlow,
+                    // This record will cause overflow, it must be split
+                    MapExp.removeByIndexRange(
+                            MapReturnType.KEY_VALUE, 
+                            Exp.val(-minorSplitItems), 
+                            Exp.mapBin(DatabaseConfig.BIN_NAME)),
+                    
+                    // This record will not cause overflow, return empty
+                    Exp.unknown()
+                )
+            ),
+            ExpWriteFlags.EVAL_NO_FAIL);
+    
+        Operation addEventToMapIfAllowed = ExpOperation.write(DatabaseConfig.BIN_NAME, Exp.build(
+                Exp.cond(
+                        willEventMakeBinOverlow,
+                        Exp.unknown(),
+                        MapExp.put(mapPolicy, 
+                                Exp.val(event.getId()), 
+                                Exp.val(List.of(event.getDeviceId(), convertEventToMap(event))),
+                                Exp.mapBin(DatabaseConfig.BIN_NAME)
+                        )
+                )
+            ),
+            ExpWriteFlags.EVAL_NO_FAIL);
+        
+        // Perform the operations. Note that the order is VERY specific, so you cannot remove
+        // the minority events before adding the new one or it will not work properly.
+        Record record = client.operate(writePolicy, splitKey, 
+                addEventToMapIfAllowed,
+                readMinorityEvents,
+                removeMinorityEvents);
+        
+        Map<String, List<?>> map = (Map<String, List<?>>) record.getMap("minority");
+        if (map.size() > 0) {
+            processOverflowOfSubRecord(writePolicy, map, baseKey, event);
+        }
+    }
+    
+    private void processOverflowOfSubRecord(WritePolicy writePolicy, Map<String, List<?>> map, Key baseKey, Event event) {
+        // The bin overflowed, the list returned the extra records, smallest first.
+        // Populate these in new bin and update the main record
+        List<Entry<String, List<?>>> overflow = new ArrayList<>(map.entrySet());
+//        List<Entry<String, List<?>>> overflow = map.entrySet()
+//                .stream()
+//                .map(AbstractMap.SimpleEntry::new)
+//                .collect(Collectors.toList());
+//
+//        overflow.add(new AbstractMap.SimpleEntry<String, List<?>>(
+//                event.getId(), 
+//                List.of(event.getDeviceId(), convertEventToMap(event))));
+        
+        String newRecordKey = overflow.get(0).getKey();
+        Key minorityKey = getContinuationKeyFromKey(baseKey, newRecordKey);
+        client.operate(writePolicy, 
+                minorityKey, 
+                Operation.put(new Bin(DatabaseConfig.BIN_NAME, overflow, MapOrder.KEY_ORDERED)),
+                MapOperation.put(mapPolicy, DatabaseConfig.BIN_NAME, 
+                        Value.get(event.getId()), 
+                        Value.get(List.of(event.getDeviceId(), convertEventToMap(event)))));
+
+        client.operate(writePolicy, baseKey, ListOperation.append(DatabaseConfig.CONTINUATION_BIN, Value.get(newRecordKey)));
+
     }
     
     /**
@@ -426,7 +678,40 @@ public class TimeSeriesDemo implements UseCase, AutoCloseable {
         validateTimestamps(startTimestamp, endTimestamp);
         
         List<Event> results = new ArrayList<>();
+        QueryRange queryRange = buildQueryRange(startTimestamp, endTimestamp, eventId, direction);
+        
+        Operation operation = createFilterOperation(queryRange.earliestEventId, queryRange.latestEventId, count, deviceIds);
+        Operation getContinuationBlock = Operation.get(DatabaseConfig.CONTINUATION_BIN);
 
+        // Note: for 100% consistent results, could do this in a transaction. But without
+        // transactions you won't get read conflicts on quickly updating records, and will
+        // not miss any updates
+        processRecordsInRange(accountId, queryRange, operation, getContinuationBlock, count, results, direction);
+        
+        return results;
+    }
+    
+    /**
+     * Helper class to encapsulate query range information
+     */
+    private static class QueryRange {
+        final String earliestEventId;
+        final String latestEventId;
+        final long startRecord;
+        final long endRecord;
+        
+        QueryRange(String earliestEventId, String latestEventId, long startRecord, long endRecord) {
+            this.earliestEventId = earliestEventId;
+            this.latestEventId = latestEventId;
+            this.startRecord = startRecord;
+            this.endRecord = endRecord;
+        }
+    }
+    
+    /**
+     * Builds the query range based on input parameters and sort direction
+     */
+    private QueryRange buildQueryRange(Long startTimestamp, Long endTimestamp, String eventId, SortDirection direction) {
         String latestEventId;
         String earliestEventId;
         
@@ -435,15 +720,13 @@ public class TimeSeriesDemo implements UseCase, AutoCloseable {
                 // Run from AFTER event id up to endTimestamp, or now if not specified
                 earliestEventId = generateNextEventId(eventId);
                 latestEventId = eventIdFromTimestamp(getLatestTimestamp(endTimestamp), false);
-            }
-            else  {
+            } else {
                 // Run from startTimestamp, or now - 14 days, to the eventId. Note that as the
                 // end event is exclusive, we do not need to calculate a prior event id.
                 latestEventId = eventId;
                 earliestEventId = eventIdFromTimestamp(getOldestTimestamp(startTimestamp), true);
             }
-        }
-        else {
+        } else {
             // Full date range, don't care about ascending or descending
             latestEventId = eventIdFromTimestamp(getLatestTimestamp(endTimestamp), false);
             earliestEventId = eventIdFromTimestamp(getOldestTimestamp(startTimestamp), true);
@@ -452,33 +735,128 @@ public class TimeSeriesDemo implements UseCase, AutoCloseable {
         long startRecord = getBucketOffset(extractTimestampFromEventId(earliestEventId));
         long endRecord = getBucketOffset(extractTimestampFromEventId(latestEventId));
         
-        Operation operation = createFilterOperation(earliestEventId, latestEventId, count, deviceIds);
-
-        if (direction == SortDirection.ASCENDING) {
-            for (long recordKey = startRecord; 
-                    results.size() < count && recordKey <= endRecord; 
-                    recordKey++) {
-                   
-               Key key = new Key(DatabaseConfig.NAMESPACE, DatabaseConfig.EVENT_SET, accountId + ":" + recordKey);
-               Record record = client.operate(null, key, operation);
-               addEventsToResults(count, record, results, direction);
-            }            
-        }
-        else {
-            for (long recordKey = endRecord; 
-                    results.size() < count && recordKey >= startRecord; 
-                    recordKey--) {
-                   
-               Key key = new Key(DatabaseConfig.NAMESPACE, DatabaseConfig.EVENT_SET, accountId + ":" + recordKey);
-               Record record = client.operate(null, key, operation);
-               addEventsToResults(count, record, results, direction);
-            }            
-        }
+        return new QueryRange(earliestEventId, latestEventId, startRecord, endRecord);
+    }
+    
+    /**
+     * Processes records in the specified range, handling both ascending and descending order
+     */
+    private void processRecordsInRange(String accountId, QueryRange queryRange, Operation operation, 
+            Operation getContinuationBlock, int count, List<Event> results, SortDirection direction) {
         
-        return results;
+        if (direction == SortDirection.ASCENDING) {
+            processRecordsAscending(accountId, queryRange, operation, getContinuationBlock, count, results);
+        } else {
+            processRecordsDescending(accountId, queryRange, operation, getContinuationBlock, count, results);
+        }
+    }
+    
+    /**
+     * Processes records in ascending order
+     */
+    private void processRecordsAscending(String accountId, QueryRange queryRange, Operation operation, 
+            Operation getContinuationBlock, int count, List<Event> results) {
+        
+        for (long recordKey = queryRange.startRecord; 
+                results.size() < count && recordKey <= queryRange.endRecord; 
+                recordKey++) {
+            
+            Key key = new Key(DatabaseConfig.NAMESPACE, DatabaseConfig.EVENT_SET, accountId + ":" + recordKey);
+            Record record = client.operate(null, key, operation, getContinuationBlock);
+            
+            if (record != null) {
+                processRecordWithContinuations(record, key, operation, queryRange.latestEventId, count, results, SortDirection.ASCENDING);
+            }
+        }
+    }
+    
+    /**
+     * Processes records in descending order
+     */
+    private void processRecordsDescending(String accountId, QueryRange queryRange, Operation operation, 
+            Operation getContinuationBlock, int count, List<Event> results) {
+        
+        for (long recordKey = queryRange.endRecord; 
+                results.size() < count && recordKey >= queryRange.startRecord; 
+                recordKey--) {
+            
+            Key key = new Key(DatabaseConfig.NAMESPACE, DatabaseConfig.EVENT_SET, accountId + ":" + recordKey);
+            Record record = client.operate(null, key, operation, getContinuationBlock);
+            
+            if (record != null) {
+                processRecordWithContinuations(record, key, operation, queryRange.earliestEventId, count, results, SortDirection.DESCENDING);
+            }
+        }
+    }
+    
+    /**
+     * Processes a record, handling continuation bins if they exist
+     */
+    private void processRecordWithContinuations(Record record, Key key, Operation operation, 
+            String boundaryEventId, int count, List<Event> results, SortDirection direction) {
+        
+        List<String> continuationBin = (List<String>) record.getList(DatabaseConfig.CONTINUATION_BIN);
+        
+        if (continuationBin != null) {
+            processContinuationBins(continuationBin, key, operation, boundaryEventId, count, results, direction);
+        } else {
+            addEventsToResults(count, record, results, direction);
+        }
+    }
+    
+    /**
+     * Processes continuation bins in the appropriate order
+     */
+    private void processContinuationBins(List<String> continuationBin, Key key, Operation operation, 
+            String boundaryEventId, int count, List<Event> results, SortDirection direction) {
+        
+        if (direction == SortDirection.ASCENDING) {
+            processContinuationBinsAscending(continuationBin, key, operation, boundaryEventId, count, results);
+        } else {
+            processContinuationBinsDescending(continuationBin, key, operation, boundaryEventId, count, results);
+        }
+    }
+    
+    /**
+     * Processes continuation bins in ascending order
+     */
+    private void processContinuationBinsAscending(List<String> continuationBin, Key key, Operation operation, 
+            String latestEventId, int count, List<Event> results) {
+        
+        // Iterate over sub-records so long as they can possibly contain results in the correct range.
+        // The items in the list are guaranteed to be in ascending order
+        for (int subKeyIndex = 0; subKeyIndex < continuationBin.size(); subKeyIndex++) {
+            String subKey = continuationBin.get(subKeyIndex);
+            if (subKey.compareTo(latestEventId) > 0 || results.size() >= count) {
+                break;
+            }
+            Key subRecordKey = getContinuationKeyFromKey(key, subKey);
+            Record subRecord = client.operate(null, subRecordKey, operation);
+            addEventsToResults(count, subRecord, results, SortDirection.ASCENDING);
+        }
+    }
+    
+    /**
+     * Processes continuation bins in descending order
+     */
+    private void processContinuationBinsDescending(List<String> continuationBin, Key key, Operation operation, 
+            String earliestEventId, int count, List<Event> results) {
+        
+        for (int subKeyIndex = continuationBin.size() - 1; subKeyIndex >= 0; subKeyIndex--) {
+            String subKey = continuationBin.get(subKeyIndex);
+            Key subRecordKey = getContinuationKeyFromKey(key, subKey);
+            Record subRecord = client.operate(null, subRecordKey, operation);
+            addEventsToResults(count, subRecord, results, SortDirection.DESCENDING);
+            
+            // When descending, we must compare the subKey to the earliest event id AFTER loading
+            // the record as it's possible that there are some events at the end of the record which
+            // are still valid.
+            if (subKey.compareTo(earliestEventId) < 0 || results.size() >= count) {
+                break;
+            }
+        }
     }
 
-    
     /**
      * Retrieves events for an account before a specified event ID.
      * 
@@ -719,7 +1097,6 @@ public class TimeSeriesDemo implements UseCase, AutoCloseable {
                 Map.of("frameIndex", 0, "type", "motion")
             )
         ));
-        
         return event;
     }
     
@@ -795,21 +1172,36 @@ public class TimeSeriesDemo implements UseCase, AutoCloseable {
          AtomicLong eventsCreated = new AtomicLong();
 
          new Generator().generate(1, GenerationConfig.NUM_ACCOUNTS, Account.class, account -> {
-             // Force account 1 to have at least 10 devices for demonstration
+             // Force account 1 to have at least 10 devices and lots of events for demonstration
              if ("acct-1".equals(account.getId())) {
                  account.setNumDevices(Math.max(10, account.getNumDevices()));
-             }
-             
-             int devicesThisAccount = account.getNumDevices();
-             for (int deviceNum = 0; deviceNum < devicesThisAccount; deviceNum++) {
-                 int eventsThisDevice = ThreadLocalRandom.current().nextInt(GenerationConfig.MAX_EVENTS_PER_DEVICE);
-                 for (int eventCount = 0; eventCount < eventsThisDevice; eventCount++) {
+                 long now = new Date().getTime();
+                 long timestamp = now - TimeUnit.DAYS.toMillis(14);
+                 for (int i = 0; i < 25_000; i++) {
+                     timestamp += ThreadLocalRandom.current().nextLong(100);
+                     int deviceId = ThreadLocalRandom.current().nextInt(account.getNumDevices());
                      Event event = generateSampleEvent(account.getId(), 
-                         "device-" + account.getId() + "-" + deviceNum);
+                             "device-" + account.getId() + "-" + deviceId);
+                     event.setTimestamp(new Date(timestamp));
+                     int randomValue = Math.abs(ThreadLocalRandom.current().nextInt());
+                     event.setId(String.format("%013d%012d", timestamp, randomValue));
+
                      upsertEvent(event, true);
                      eventsCreated.incrementAndGet();
                  }
-                 devicesCreated.incrementAndGet();
+             }
+             else {
+                 int devicesThisAccount = account.getNumDevices();
+                 for (int deviceNum = 0; deviceNum < devicesThisAccount; deviceNum++) {
+                     int eventsThisDevice = ThreadLocalRandom.current().nextInt(GenerationConfig.MAX_EVENTS_PER_DEVICE);
+                     for (int eventCount = 0; eventCount < eventsThisDevice; eventCount++) {
+                         Event event = generateSampleEvent(account.getId(), 
+                             "device-" + account.getId() + "-" + deviceNum);
+                         upsertEvent(event, true);
+                         eventsCreated.incrementAndGet();
+                     }
+                     devicesCreated.incrementAndGet();
+                 }
              }
              accountsCreated.incrementAndGet();
          })
@@ -821,9 +1213,6 @@ public class TimeSeriesDemo implements UseCase, AutoCloseable {
      * Demonstrates various query operations.
      */
     private void demonstrateQueries() {
-        System.out.printf("Account acct-1 has %,d events%n%n", 
-            getTotalEventsForAccount("acct-1"));
-        
         // Demonstrate pagination for all devices
         System.out.println("First list -- acct-1, all devices");
         List<Event> events = getEventsBefore("acct-1", null, 50);
@@ -842,7 +1231,7 @@ public class TimeSeriesDemo implements UseCase, AutoCloseable {
         
         int pageCounter = 1;
         String eventIdAtTopOfPage = null;
-        while (events.size() == pageSize) {
+        while (events.size() == pageSize && pageCounter < 5) {
             System.out.printf("Page %,d%n", ++pageCounter);
             eventIdAtTopOfPage = getLastElement(events).getId();
             events = getEventsBefore("acct-1", eventIdAtTopOfPage, pageSize, 
@@ -864,14 +1253,9 @@ public class TimeSeriesDemo implements UseCase, AutoCloseable {
                 SortDirection.DESCENDING, "device-acct-1-8", "device-acct-1-9", "device-acct-10");
         displayEvents(events);
 
-        System.out.println("\nShowing last 2 days of events in ascenting order");
-        long now = System.nanoTime();
-        events = getEventsBetween("acct-1", startTime, endTime, null, 100_000, 
-                SortDirection.ASCENDING, "device-acct-1-8", "device-acct-1-9", "device-acct-10");
-        long totalTime = System.nanoTime() - now;
-        System.out.printf("Time taken: %,dus\n", totalTime / 1000);
+        System.out.println("Showing events for acct-2, all devices");
+        events = getEventsBefore("acct-2", null, 20_000);
         displayEvents(events);
-        
     }
     
     // ============================================================================
@@ -885,7 +1269,7 @@ public class TimeSeriesDemo implements UseCase, AutoCloseable {
      * @throws Exception if any error occurs during execution
      */
     public static void main(String[] args) throws Exception {
-        try (TimeSeriesDemo runner = createWithDefaultClient()) {
+        try (TimeSeriesLargeVarianceDemo runner = createWithDefaultClient()) {
             // Generate sample data
             runner.generateSampleData();
             

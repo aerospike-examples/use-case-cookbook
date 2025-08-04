@@ -9,4 +9,8 @@ public interface UseCase {
     String getReference();
     void setup(IAerospikeClient client, AeroMapper mapper) throws Exception;
     void run(IAerospikeClient client, AeroMapper mapper) throws Exception;
+    
+    default String[] getTags() {
+        return new String[] {};
+    }
 }

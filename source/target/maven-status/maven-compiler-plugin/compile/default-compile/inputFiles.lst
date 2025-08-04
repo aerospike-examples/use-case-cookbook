@@ -3,12 +3,14 @@
 /Users/tfaulkes/Programming/Aerospike/git/use-case-cookbook/source/src/main/java/com/aerospike/examples/AerospikeClientProxy.java
 /Users/tfaulkes/Programming/Aerospike/git/use-case-cookbook/source/src/main/java/com/aerospike/examples/manytomany/model/Account.java
 /Users/tfaulkes/Programming/Aerospike/git/use-case-cookbook/source/src/main/java/com/aerospike/examples/setup/model/Account.java
+/Users/tfaulkes/Programming/Aerospike/git/use-case-cookbook/source/src/main/java/com/aerospike/examples/realtimebidding/RealTimeBiddingDemo.java
 /Users/tfaulkes/Programming/Aerospike/git/use-case-cookbook/source/src/main/java/com/aerospike/examples/timeseries/model/Account.java
 /Users/tfaulkes/Programming/Aerospike/git/use-case-cookbook/source/src/main/java/com/aerospike/examples/timeseries/TimeSeriesDemo.java
 /Users/tfaulkes/Programming/Aerospike/git/use-case-cookbook/source/src/main/java/com/aerospike/examples/onetomany/model/Agent.java
 /Users/tfaulkes/Programming/Aerospike/git/use-case-cookbook/source/src/main/java/com/aerospike/examples/UseCaseCookbookRunner.java
 /Users/tfaulkes/Programming/Aerospike/git/use-case-cookbook/source/src/main/java/com/aerospike/examples/manytomany/ManyToManyRelationships.java
 /Users/tfaulkes/Programming/Aerospike/git/use-case-cookbook/source/src/main/java/com/aerospike/examples/gaming/Leaderboard.java
+/Users/tfaulkes/Programming/Aerospike/git/use-case-cookbook/source/src/main/java/com/aerospike/examples/timeseries/TimeSeriesLargeVarianceDemo.java
 /Users/tfaulkes/Programming/Aerospike/git/use-case-cookbook/source/src/main/java/com/aerospike/examples/manytomany/model/Customer.java
 /Users/tfaulkes/Programming/Aerospike/git/use-case-cookbook/source/src/main/java/com/aerospike/examples/setup/SetupDemo.java
 /Users/tfaulkes/Programming/Aerospike/git/use-case-cookbook/source/src/main/java/com/aerospike/examples/gaming/PlayerMatching.java

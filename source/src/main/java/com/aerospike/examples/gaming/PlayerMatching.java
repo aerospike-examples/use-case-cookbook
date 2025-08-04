@@ -66,6 +66,11 @@ public class PlayerMatching implements UseCase {
                 + "their opponents 80% of the time. If a player with a shiled attacks "
                 + "during a shield, the shield is removed.";
     }
+    
+    @Override
+    public String[] getTags() {
+        return new String[] {"Expressions", "Operations"};
+    }
 
     @Override
     public void setup(IAerospikeClient client, AeroMapper mapper) throws Exception {

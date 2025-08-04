@@ -42,7 +42,7 @@ public class ManyToManyRelationships implements UseCase{
 
     @Override
     public String getDescription() {
-        return "Demonstrate how to handle manu-to-many relationships in Aerospike. Traversing relationships in both directions and adding "
+        return "Demonstrate how to handle many-to-many relationships in Aerospike. Traversing relationships in both directions and adding "
                 + "entites are discussed.";
     }
     

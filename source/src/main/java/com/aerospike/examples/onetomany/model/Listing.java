@@ -14,7 +14,7 @@ import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
-@AerospikeRecord(namespace = "${demo.namespace:test}", set = "listing")
+@AerospikeRecord(namespace = "${demo.namespace:test}", set = "uccb_listing")
 @GenMagic
 @NoArgsConstructor
 @AllArgsConstructor

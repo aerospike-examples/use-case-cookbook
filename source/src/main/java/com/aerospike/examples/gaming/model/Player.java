@@ -7,14 +7,11 @@ import com.aerospike.generator.annotations.GenNumber;
 import com.aerospike.mapper.annotations.AerospikeKey;
 import com.aerospike.mapper.annotations.AerospikeRecord;
 
-import lombok.Builder;
 import lombok.Data;
-import lombok.NoArgsConstructor;
 
-@AerospikeRecord(namespace = "test", set = "player")
+@AerospikeRecord(namespace = "test", set = "uccb_player")
 @GenMagic
 @Data
-@NoArgsConstructor
 public class Player {
     @AerospikeKey
     @GenExpression("$Key")

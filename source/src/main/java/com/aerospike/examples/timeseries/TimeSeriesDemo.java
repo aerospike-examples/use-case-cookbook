@@ -144,7 +144,7 @@ public class TimeSeriesDemo implements UseCase, AutoCloseable {
     }
     @Override
     public String getName() {
-        return "Ingest and query time-series data";
+        return "Predictable time-series data";
     }
 
     @Override
@@ -154,8 +154,8 @@ public class TimeSeriesDemo implements UseCase, AutoCloseable {
                 + "The data model has many accounts, each account has a handful of devices, and the devices "
                 + "generate events when triggered. The events are stored for 14 days, and queries can be "
                 + "performed on the events for an account, filtering by time range and / or a list of device ids. "
-                + "This show a way to store time series data with events occurring on a sporadic (random) basis, "
-                + "although the technique could easliy be used for events occuring on a periodic basis like stock ticks.";
+                + "This show a way to store time series data with events occurring on a sporadic (random) basis, with "
+                + "low variation in cardinality, or events occuring on a periodic basis like stock ticks.";
     }
 
     @Override
@@ -794,7 +794,9 @@ public class TimeSeriesDemo implements UseCase, AutoCloseable {
          AtomicLong devicesCreated = new AtomicLong();
          AtomicLong eventsCreated = new AtomicLong();
 
-         new Generator().generate(1, GenerationConfig.NUM_ACCOUNTS, Account.class, account -> {
+         // These objects can get large, which might cause device overflow errors. Limit the number of 
+         // generator threads to 1 to prevent this.
+         new Generator().generate(1, GenerationConfig.NUM_ACCOUNTS, 1, Account.class, account -> {
              // Force account 1 to have at least 10 devices for demonstration
              if ("acct-1".equals(account.getId())) {
                  account.setNumDevices(Math.max(10, account.getNumDevices()));

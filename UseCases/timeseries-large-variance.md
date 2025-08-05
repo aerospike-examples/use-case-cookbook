@@ -1,26 +1,64 @@
-# Time series data
+# Time series data with high variance
 [Back to all use cases](../README.md)
 
-[Link to working code](../source/src/main/java/com/aerospike/examples/timeseries/TimeSeriesDemo.java)
+[Link to working code](../source/src/main/java/com/aerospike/examples/timeseries/TimeSeriesLargeVarianceDemo.java)
 
 ## Use case
-Cameras or other devices record events at random times as stimuli (eg motion) cause events to be generated. These devices are associated with an account, and it is expected than an account will have no more than about 50 devices. Each device will generate multiple events.
+This use case extends the [time series](timeseries.md) use case for situations where there can be high variance in the number of items to be recorded. Many situations call for a normal distribution (aka "bell curve") of events against devices, where there are many devices which generate a small number of events, but there are a few devices which generate exceptionally large numbers of events. 
 
-There will be a very large number of accounts, but the number of devices per account will be low (< 50) and the number of events per device will also be relatively low (< 1000 per day).
+A good example of this is credit-card transactions. The average person probably does less than 20 transactions a day and there are many, many people in this category. However, a very large corporation with a corporate credit account might do upwards of 100,000 transactions. Or an emergency help line might handle dozens of calls a day normally, but if a city-wide disaster strikes, this might spike into many thousands.
+
+This use case will handle very large numbers of accounts with an arbitrary number of events per day, unlike the [time series](timeseries.md) model which was finitely bounded. It will also handle the same premise (accounts have devices, devices generate events), but will be applicable to a large number of scenarios, with no constraints.
 
 ### Queries which need to be answered are:
 - Insert an event
 - Update an event
-- Query events by a date range with the following features:
-    - Events are returned in order, either ascending or descending aas specified
-    - Pagination forwards or backwards should be allowed
-    - if no dates are specified, return the most recent eventws
-    - The time range start, the time range end and the event used for pagination are all optional; the system should behave appropriately if any or all of these parameters are not passed.
-    - One or more device ids can be specified. If any devices are specified, the events are filtered down to just the specified devices.
+- Query events by a date range
 
-The difference between an insert and an update is that the insert should set the TTL of the records to the number of days specified in the use case (14). An update should not alter the TTL of the record.
+Note that these are exactly the same queries that needed to be answered in the [time series](timeseries.md) use case. In fact, we're going to keep the interface the same (and hence be able to satisfy exactly the same queries), just change the underlying data model to reflect a more advanced storage pattern.
 
 ## Data model
+The premise of the data model will the same as the [time series](timeseries.md) use case. Events will be stored in time-based buckets, each of a finite width. Writes will occur into a map in the bucket, reads will read the map. 
+
+However, we will define a limit of the number of records in a bucket, the threshold. Prior to reaching this threshold, the behavior is identical to the [time series](timeseries.md) use case -- inserts occur into the root map atomically with no need for a transaction, reads occur directly from the root map -- except there is a filter expression to determine whether the limit will be reached or not: 
+```java
+public Exp getDoesContinuationBlockExistExp() {
+    return Exp.binExists(DatabaseConfig.CONTINUATION_BIN);
+}
+
+
+Exp canWriteToRootBlock = Exp.and(
+        Exp.not(
+                getDoesContinuationBlockExistExp()
+        ),
+        Exp.lt(
+                MapExp.size(Exp.mapBin(DatabaseConfig.BIN_NAME)),
+                Exp.val(DatabaseConfig.MAX_RECORDS_PER_BUCKET)
+        )
+);
+
+writePolicy.failOnFilteredOut = false;
+writePolicy.filterExp = Exp.build(canWriteToRootBlock);
+
+```
+
+Once this limit is exceeded, we will change storage format. Diagramatically, this looks like:
+![timeseries with large variance](../images/timeseries-large-variance-data-model.png)
+
+Notice in the diagram that day 5 has reached the threshold. At this point the map which contains the data is emptied, and a new bin, a continuation bin is created. This bin is a list of event ids. The ids serve two purposes:
+
+1. Each id maps to one sub-record. This, combined with the primary key of the bucket, will form the key of the Aerospike record. In the example, the bucket record's key is `Acct-Day5` and the first element in the map is `event_id6`, so the id of the first continuation record is `Acct-Day5:event_id6`. In reality, the bucket record's id will be something like `acct-1:568` with the continuation record's id being `acct-1:568-1753175980346001295536836`
+
+2. The id is the lowest value that that block will contain. In order to find which sub-record an incoming event should be inserted into, find the biggest value in the list which is less than that id, and this will be the block.
+
+Let's illustrate that last point with an example. Say the list contains `[5, 20, 40]` and the event `25` needs to be inserted. `20` is the biggest item in the list smaller than `25`, so `25` will be inserted into this record.
+
+Once inserted into this list, the items are immutable. New items may be added to the end of the list, but existing items cannot be changed.
+
+We also have to cater for the fact that events may arrive out of order. It is most likely that two events, t<sub>0</sub> and t<sub>1</sub> will arrive in that order, but we must cater for the possibility of t<sub>1</sub> arriving before t<sub>0</sub>. To cater for this, the first element in the list is always the smallest possible timestamp for that bucket. 
+
+
+
 Since the number of devices per account, and the number of events per device are both low, we can come up with a simple data model. For each day, we can store all the events for all the devices in one Aerospike record. We compute an offset from a fixed point in time (eg 1/1/2024) with 1st Jan 2024 being day 0, 2nd Jan 2024 being day 1, etc. This give us a date offset: 
 
 ```
@@ -48,11 +86,6 @@ map: {
 ```
 
 So long as we create the map as a `KEY_ORDERED` map, Aerospike will ensure that the events are stored in ascending order as we add / update new events. We can retrieve events from the map using map operations like `getByKeyRange`, providing we pass the desired timestamps as eventIds. 
-
-Visually, this looks like:
-![timeseries-data-model](../images/timeseries-data-model.png)
-
-Note that days with no events will automatically have no records -- the records are created by the process of inserting an event into the map. If the record containing the map does not exist, Aerospike will (by default) create the record and the map.
 
 Great, this satisfies the filtering requirement by date range. The pagination can be satisfied by careful selection of the event range. For example, in the map above, if the last key shown was `1753652625131001737686856` and we're descending we can end the next range at this same key (as the Aerospike `getByKeyRange` method is __exclusive__ of the end key). If we're ascending, we would need to start the next page at `1753652625131001737686856 + 1` as the function call is __inclusive__ of the start key.
 
@@ -414,10 +447,3 @@ Page 4
  2: 1753666135807001568506528 - Mon Jul 28 08:28:55 ICT 2025 - device-acct-1-3
  ...
 ```
-
-## Limitations
-Note that even with the configurable bucket size, this model still cannot handle every use case. If there is high variance in the number of events per bucket, sometimes containing only a handful and other times containing thousands, this model will break down due to the 8MiB limit on Aerospike records.
-
-Even if this limit didn't exist, large records would still be a problem. Aerospike is a "copy-on-write" system, so every change to a record will make Aerospike read the entire record off storage, update it, then write the entire record back to storage. This works great at smaller record sizes, but imagine reading and then writing 8MiB just to insert a 1kB record. This would be very slow and create significant wear-and-tear on the storage device.
-
-For a solution to this use case, see the [time series with high variance](timeseries-large-variance.md) use case. 

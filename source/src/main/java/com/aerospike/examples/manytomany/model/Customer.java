@@ -10,11 +10,9 @@ import com.aerospike.mapper.annotations.AerospikeKey;
 import com.aerospike.mapper.annotations.AerospikeRecord;
 
 import lombok.Data;
-import lombok.NoArgsConstructor;
 
-@AerospikeRecord(namespace = "${demo.namespace:test}", set = "customer")
+@AerospikeRecord(namespace = "${demo.namespace:test}", set = "uccb_customer")
 @Data
-@NoArgsConstructor
 @GenMagic
 public class Customer {
     @AerospikeKey

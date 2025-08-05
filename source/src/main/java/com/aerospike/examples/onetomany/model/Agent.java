@@ -12,7 +12,7 @@ import com.aerospike.mapper.annotations.AerospikeRecord;
 
 import lombok.Data;
 
-@AerospikeRecord(namespace = "${demo.namespace:test}", set = "agent")
+@AerospikeRecord(namespace = "${demo.namespace:test}", set = "uccb_agent")
 @Data
 @GenMagic
 public class Agent {

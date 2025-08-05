@@ -68,6 +68,11 @@ public class Leaderboard implements UseCase {
     public String getReference() {
         return "https://github.com/aerospike-examples/use-case-cookbook/blob/main/UseCases/leaderboard.md";
     }
+    
+    @Override
+    public String[] getTags() {
+        return new String[] {"Transactions", "Map Operations", "Expressions" };
+    }
 
     public void setDefaultValues(AeroMapper mapper) {
         this.playerNamespace = mapper.getNamespace(Player.class);

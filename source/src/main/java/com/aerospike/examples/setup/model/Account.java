@@ -15,7 +15,7 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 @AllArgsConstructor
 @GenMagic
-@AerospikeRecord(namespace = "${demo.namespace:test}", set = "account")
+@AerospikeRecord(namespace = "${demo.namespace:test}", set = "uccb_account")
 public class Account {
     @AerospikeKey
     private UUID id;

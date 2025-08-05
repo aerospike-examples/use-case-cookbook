@@ -16,7 +16,7 @@ import com.aerospike.mapper.annotations.AerospikeRecord;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
-@AerospikeRecord(namespace = "${demo.namespace:test}", set = "events")
+@AerospikeRecord(namespace = "${demo.namespace:test}", set = "uccb_events")
 @Data
 @NoArgsConstructor
 public class Event {

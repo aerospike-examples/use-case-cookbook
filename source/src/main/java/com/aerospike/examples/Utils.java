@@ -1,5 +1,7 @@
 package com.aerospike.examples;
 
+import java.util.HashMap;
+import java.util.Map;
 import java.util.concurrent.ThreadLocalRandom;
 
 import com.aerospike.client.AerospikeException;
@@ -28,6 +30,15 @@ public class Utils {
     public static void sleep(int minMs, int maxMs) {
         sleep(ThreadLocalRandom.current().nextInt(minMs, maxMs+1));
     }
+    
+    public static Map<String, Object> getParamMap(UseCase useCase) {
+        Map<String, Object> result = new HashMap<>();
+        for (Parameter<?> thisParam : useCase.getParams()) {
+            result.put(thisParam.getName(), thisParam.get());
+        }
+        return result;
+    }
+    
     @FunctionalInterface
     public static interface Transactional<T> {
         T execute(Txn txn);

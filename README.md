@@ -132,3 +132,8 @@ Related to leaderboards is the ability to have players matching against similar 
 ## Time Series Data
 Inserting, updating and querying time-series data is very important in range of industries. From monitoring dashboards, to credit card swipes, to motion detects, many use cases have this requirement. See [Time Series](UseCases/timeseries.md)
 
+## Time Series Data with Large Variance
+In many cases, time series data is not regular, but rather has a bell-curve (normal) style distribution, with a large number of stimuli generating a small number of events, but a small number of stimuli causing a very large number of events. Think corporate credit card swipes, social media when disaster strikes, etc. This is a harder set of data to model efficiently for, this use case implements a pattern to do so. See [Time Series with Large Variance](UseCases/timeseries-large-variance.md)
+
+## Recent events across DCs
+It is not uncommon to need to merge events on the same account across different DCs. For example, a credit card company wants the 50 most recent transactions for a credit card, but transactions can be generated in either of two DCs. Eventual consistency is a must -- latency and throughput requirements do not allow a stretch cluster between the different DCs. See [Transactions across DCs](UseCases/top-transactions-across-dcs.md)

@@ -28,6 +28,13 @@ public interface UseCase {
     }
     
     /**
+     * Get a list of the parameters for this use case to allow it to be customized
+     * @return
+     */
+    default Parameter<?>[] getParams() {
+        return new Parameter<?>[] {};
+    }
+    /**
      * Setup of the use case. This should be used to truncate the set, generate new data,
      * etc. This setup will be run whenever the use case is selected and does not necessarily
      * reflect business logic associated with the use case.

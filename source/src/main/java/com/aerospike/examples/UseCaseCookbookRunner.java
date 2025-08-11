@@ -433,9 +433,13 @@ public class UseCaseCookbookRunner {
         try (Scanner scanner = new Scanner(System.in)) {
 
             boolean summary = false;
+            boolean skipUseCaseDetails = false;
             while (true) {
                 showStartHeader();
-                showUseCaseDetails(length, summary);
+                if (!skipUseCaseDetails) {
+                    showUseCaseDetails(length, summary);
+                }
+                skipUseCaseDetails = false;
                 
                 // Show search status if active
                 if (currentSearchTerm != null && !currentSearchTerm.trim().isEmpty()) {
@@ -499,6 +503,7 @@ public class UseCaseCookbookRunner {
                 // Handle help command
                 if (input.equalsIgnoreCase("help") || input.equalsIgnoreCase("h") || input.equals("?")) {
                     showHelp();
+                    skipUseCaseDetails = true;
                     continue;
                 }
         
@@ -528,6 +533,15 @@ public class UseCaseCookbookRunner {
         UseCase uc = filteredUseCases.get(selection - 1);
         System.out.println("\n" + BOLD + "Selected Use Case #" + selection + ": " + uc.getName() + RESET + "\n");
         
+        // Check if the use case has parameters
+        Parameter<?>[] params = uc.getParams();
+        if (params.length > 0) {
+            if (!handleParameters(uc, params)) {
+                // User cancelled parameter configuration
+                return;
+            }
+        }
+        
         try {
             System.out.println("\nSetting up the data for the use case...");
             uc.setup(client, mapper);
@@ -542,6 +556,160 @@ public class UseCaseCookbookRunner {
             System.err.println("   Stack trace:");
             e.printStackTrace();
             
+        }
+    }
+    
+    /**
+     * Handles parameter configuration for a use case.
+     * @param uc The use case
+     * @param params The parameters to configure
+     * @return true if the user wants to proceed, false if they cancelled
+     */
+    private boolean handleParameters(UseCase uc, Parameter<?>[] params) {
+        Scanner scanner = new Scanner(System.in);
+        
+        System.out.println(CYAN + "This use case has configurable parameters:" + RESET);
+        System.out.println();
+        
+        // Display current parameter values
+        for (int i = 0; i < params.length; i++) {
+            Parameter<?> param = params[i];
+            String description = param.getDescription();
+            if (description == null) {
+                description = "No description available";
+            }
+            System.out.printf("%s%d.%s %s%s%s = %s%s%s%n", 
+                YELLOW, i + 1, RESET,
+                BOLD, param.getName(), RESET,
+                GREEN, param.get(), RESET);
+            System.out.printf("   %s%s%s%n", MEDIUM_GRAY, description, RESET);
+        }
+        
+        System.out.println();
+        System.out.println("Options:");
+        System.out.println("  " + YELLOW + "Enter" + RESET + " - Use current parameters and run the use case");
+        System.out.println("  " + YELLOW + "1-" + params.length + RESET + " - Modify a specific parameter");
+        System.out.println("  " + YELLOW + "cancel" + RESET + " - Cancel and return to menu");
+        System.out.println();
+        
+        while (true) {
+            System.out.print(CYAN + "Enter your choice: " + RESET);
+            String input = scanner.nextLine().trim();
+            
+            if (input.isEmpty()) {
+                // User chose to use current parameters
+                return true;
+            }
+            
+            if (input.equalsIgnoreCase("cancel")) {
+                return false;
+            }
+            
+            try {
+                int paramIndex = Integer.parseInt(input) - 1;
+                if (paramIndex >= 0 && paramIndex < params.length) {
+                    if (modifyParameter(params[paramIndex], scanner)) {
+                        // Re-display parameters after modification
+                        System.out.println();
+                        System.out.println(CYAN + "Updated parameters:" + RESET);
+                        for (int i = 0; i < params.length; i++) {
+                            Parameter<?> param = params[i];
+                            String description = param.getDescription();
+                            if (description == null) {
+                                description = "No description available";
+                            }
+                            System.out.printf("%s%d.%s %s%s%s = %s%s%s%n", 
+                                YELLOW, i + 1, RESET,
+                                BOLD, param.getName(), RESET,
+                                GREEN, param.get(), RESET);
+                            System.out.printf("   %s%s%s%n", MEDIUM_GRAY, description, RESET);
+                        }
+                        System.out.println();
+                    }
+                } else {
+                    System.out.println(RED + "Invalid parameter number. Please enter 1-" + params.length + " or 'cancel'." + RESET);
+                }
+            } catch (NumberFormatException e) {
+                System.out.println(RED + "Invalid input. Please enter a number, 'cancel', or press Enter to use current parameters." + RESET);
+            }
+        }
+    }
+    
+    /**
+     * Modifies a single parameter value.
+     * @param param The parameter to modify
+     * @param scanner The scanner for user input
+     * @return true if the parameter was modified, false if cancelled
+     */
+    private boolean modifyParameter(Parameter<?> param, Scanner scanner) {
+        System.out.println();
+        System.out.printf("Modifying parameter: %s%s%s%n", BOLD, param.getName(), RESET);
+        if (param.getDescription() != null) {
+            System.out.printf("Description: %s%s%s%n", MEDIUM_GRAY, param.getDescription(), RESET);
+        }
+        System.out.printf("Current value: %s%s%s%n", GREEN, param.get(), RESET);
+        System.out.printf("Type: %s%s%s%n", YELLOW, param.get().getClass().getSimpleName(), RESET);
+        System.out.println();
+        System.out.println("Enter new value or 'cancel' to keep current value:");
+        
+        while (true) {
+            System.out.print(CYAN + "New value: " + RESET);
+            String input = scanner.nextLine().trim();
+            
+            if (input.equalsIgnoreCase("cancel")) {
+                return false;
+            }
+            
+            try {
+                Object newValue = parseValue(input, param.get().getClass());
+                setParameterValue(param, newValue);
+                System.out.println(GREEN + "Parameter updated successfully!" + RESET);
+                return true;
+            } catch (IllegalArgumentException e) {
+                System.out.println(RED + "Invalid value: " + e.getMessage() + RESET);
+                System.out.println("Please enter a valid " + param.get().getClass().getSimpleName() + " value or 'cancel'.");
+            }
+        }
+    }
+    
+    /**
+     * Parses a string value to the appropriate type.
+     * @param input The input string
+     * @param targetType The target type
+     * @return The parsed value
+     * @throws IllegalArgumentException if the value cannot be parsed
+     */
+    private Object parseValue(String input, Class<?> targetType) {
+        if (targetType == String.class) {
+            return input;
+        } else if (targetType == Integer.class || targetType == int.class) {
+            return Integer.parseInt(input);
+        } else if (targetType == Long.class || targetType == long.class) {
+            return Long.parseLong(input);
+        } else if (targetType == Double.class || targetType == double.class) {
+            return Double.parseDouble(input);
+        } else if (targetType == Float.class || targetType == float.class) {
+            return Float.parseFloat(input);
+        } else if (targetType == Boolean.class || targetType == boolean.class) {
+            return Boolean.parseBoolean(input);
+        } else {
+            throw new IllegalArgumentException("Unsupported type: " + targetType.getSimpleName());
+        }
+    }
+    
+    /**
+     * Sets the value of a parameter using reflection.
+     * @param param The parameter
+     * @param value The new value
+     */
+    private void setParameterValue(Parameter<?> param, Object value) {
+        try {
+            // Use reflection to access the private 'value' field
+            java.lang.reflect.Field valueField = Parameter.class.getDeclaredField("value");
+            valueField.setAccessible(true);
+            valueField.set(param, value);
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to set parameter value", e);
         }
     }
     
@@ -561,6 +729,7 @@ public class UseCaseCookbookRunner {
         System.out.println("  clear          - Clear search and show all use cases");
         System.out.println("Running a use case:");
         System.out.println("  <shown number> - Execute the use case with the specified number");
+        System.out.println("                  (If the use case has parameters, you'll be prompted to configure them)");
         System.out.println("Exiting the program:");
         System.out.println("  exit / quit    - Show this help text");
         System.out.println();

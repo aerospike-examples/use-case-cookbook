@@ -36,10 +36,10 @@ import com.aerospike.mapper.tools.AeroMapper;
 public class TopTransactionsAcrossDcs implements UseCase {
     public static final String BIN_DC1 = "txns_dc1";
     public static final String BIN_DC2 = "txns_dc2";
-    public static final Parameter<Long> NUM_ACCOUNTS = new Parameter<>("NUM_ACCOUNTS", 1_000l);
-    public static final Parameter<Integer> SIMULATION_DAYS = new Parameter<>("SIMULATION_DAYS", 30);
-    public static final Parameter<Integer> MAX_TRANSACTIONS = new Parameter<>("MAX_TRANSACTIONS", 50);
-    public static final Parameter<Long> RUN_DURATION_SECONDS = new Parameter<>("RUN_DURATION_SECONDS", 25L);
+    public static final Parameter<Long> NUM_ACCOUNTS = new Parameter<>("NUM_ACCOUNTS", 1_000l, "Number of accounts to use");
+    public static final Parameter<Integer> SIMULATION_DAYS = new Parameter<>("SIMULATION_DAYS", 30, "How many days to cover in the simulation");
+    public static final Parameter<Integer> MAX_TRANSACTIONS = new Parameter<>("MAX_TRANSACTIONS", 50, "How many most recent transactions to retrieve");
+    public static final Parameter<Long> RUN_DURATION_SECONDS = new Parameter<>("RUN_DURATION_SECONDS", 25L, "The duration to run the simulation for.");
     
     private static final MapPolicy mapPolicy = new MapPolicy(MapOrder.KEY_ORDERED, MapWriteFlags.DEFAULT);
     private IAerospikeClient client;

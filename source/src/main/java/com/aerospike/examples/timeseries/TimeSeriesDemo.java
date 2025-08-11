@@ -32,6 +32,7 @@ import com.aerospike.client.policy.BatchPolicy;
 import com.aerospike.client.policy.ClientPolicy;
 import com.aerospike.client.policy.Policy;
 import com.aerospike.client.policy.WritePolicy;
+import com.aerospike.examples.Parameter;
 import com.aerospike.examples.UseCase;
 import com.aerospike.examples.timeseries.model.Account;
 import com.aerospike.examples.timeseries.model.Event;
@@ -84,8 +85,8 @@ public class TimeSeriesDemo implements UseCase, AutoCloseable {
     public static final class TimeConfig {
         public static final long MILLIS_PER_HOUR = TimeUnit.HOURS.toMillis(1);
         public static final long DATE_OFFSET_MILLIS = TimeUnit.DAYS.toMillis(LocalDate.of(2024, 1, 1).toEpochDay());
-        public static final int BUCKET_WIDTH_HOURS = 24;
-        public static final int MAX_DAYS_TO_STORE = 14;
+        public static final Parameter<Integer> BUCKET_WIDTH_HOURS = new Parameter<>("BUCKET_WIDTH_HOURS", 24, "How many hours of transactions to store in a bucket");
+        public static final Parameter<Integer> MAX_DAYS_TO_STORE = new Parameter<>("MAX_DAYS_TO_STORE",14, "How many days of transactions to store");
         public static final int HOURS_PER_DAY = 24;
         public static final int EVENT_ID_TIMESTAMP_LENGTH = 13;
         public static final int EVENT_ID_RANDOM_LENGTH = 12;
@@ -169,6 +170,11 @@ public class TimeSeriesDemo implements UseCase, AutoCloseable {
     }
     
     @Override
+    public Parameter<?>[] getParams() {
+        return new Parameter<?>[] {TimeConfig.BUCKET_WIDTH_HOURS, TimeConfig.MAX_DAYS_TO_STORE};
+    }
+    
+    @Override
     public void setup(IAerospikeClient client, AeroMapper mapper) throws Exception {
         setClient(client, mapper);
         
@@ -193,7 +199,7 @@ public class TimeSeriesDemo implements UseCase, AutoCloseable {
      * @return The bucket offset from the reference date
      */
     public static long getBucketOffset(long timestamp) {
-        return (timestamp - TimeConfig.DATE_OFFSET_MILLIS) / (TimeConfig.MILLIS_PER_HOUR * TimeConfig.BUCKET_WIDTH_HOURS);
+        return (timestamp - TimeConfig.DATE_OFFSET_MILLIS) / (TimeConfig.MILLIS_PER_HOUR * TimeConfig.BUCKET_WIDTH_HOURS.get());
     }
     
     /**
@@ -367,7 +373,7 @@ public class TimeSeriesDemo implements UseCase, AutoCloseable {
         
         WritePolicy writePolicy = client.copyWritePolicyDefault();
         if (setExpiry) {
-            writePolicy.expiration = (int)TimeUnit.DAYS.toSeconds(TimeConfig.MAX_DAYS_TO_STORE);
+            writePolicy.expiration = (int)TimeUnit.DAYS.toSeconds(TimeConfig.MAX_DAYS_TO_STORE.get());
         }
         else {
             writePolicy.expiration = -2; // Do not alter TTL
@@ -385,7 +391,7 @@ public class TimeSeriesDemo implements UseCase, AutoCloseable {
      */
     private long getOldestTimestamp(Long startTimestamp) {
         if (startTimestamp == null) {
-            return new Date().getTime() - TimeUnit.DAYS.toMillis(TimeConfig.MAX_DAYS_TO_STORE);
+            return new Date().getTime() - TimeUnit.DAYS.toMillis(TimeConfig.MAX_DAYS_TO_STORE.get());
         }
         else {
             return startTimestamp;
@@ -519,8 +525,8 @@ public class TimeSeriesDemo implements UseCase, AutoCloseable {
         
         long now = new Date().getTime();
         long firstRecord = getBucketOffset(now);
-        int bucketsForTimeRange = (int)((TimeConfig.MAX_DAYS_TO_STORE * TimeConfig.HOURS_PER_DAY + TimeConfig.BUCKET_WIDTH_HOURS - 1)
-                / TimeConfig.BUCKET_WIDTH_HOURS);
+        int bucketsForTimeRange = (int)((TimeConfig.MAX_DAYS_TO_STORE.get() * TimeConfig.HOURS_PER_DAY + TimeConfig.BUCKET_WIDTH_HOURS.get() - 1)
+                / TimeConfig.BUCKET_WIDTH_HOURS.get());
         long endRecord = firstRecord - bucketsForTimeRange;
         Key[] keys = new Key[bucketsForTimeRange + 1];
         

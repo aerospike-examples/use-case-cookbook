@@ -25,6 +25,7 @@ import com.aerospike.examples.onetomany.OneToManyRelationships;
 import com.aerospike.examples.setup.SetupDemo;
 import com.aerospike.examples.timeseries.TimeSeriesDemo;
 import com.aerospike.examples.timeseries.TimeSeriesLargeVarianceDemo;
+import com.aerospike.examples.transactionprocessing.TopTransactionsAcrossDcs;
 import com.aerospike.mapper.tools.AeroMapper;
 
 public class UseCaseCookbookRunner {
@@ -75,7 +76,8 @@ public class UseCaseCookbookRunner {
             new Leaderboard(),
             new PlayerMatching(),
             new TimeSeriesDemo(),
-            new TimeSeriesLargeVarianceDemo()
+            new TimeSeriesLargeVarianceDemo(),
+            new TopTransactionsAcrossDcs()
     );
     
     /** The Aerospike client to use for the demonstration */

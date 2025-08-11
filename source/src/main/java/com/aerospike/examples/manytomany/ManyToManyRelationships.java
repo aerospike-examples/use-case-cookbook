@@ -24,6 +24,7 @@ import com.aerospike.client.cdt.ListReturnType;
 import com.aerospike.client.cdt.ListWriteFlags;
 import com.aerospike.client.policy.BatchPolicy;
 import com.aerospike.client.policy.WritePolicy;
+import com.aerospike.examples.Parameter;
 import com.aerospike.examples.UseCase;
 import com.aerospike.examples.Utils;
 import com.aerospike.examples.manytomany.model.Account;
@@ -32,8 +33,8 @@ import com.aerospike.generator.Generator;
 import com.aerospike.mapper.tools.AeroMapper;
 
 public class ManyToManyRelationships implements UseCase{
-    private static final int NUM_ACCOUNTS = 2_000;
-    private static final int NUM_CUSTOMERS = 1_000;
+    private static final Parameter<Integer> NUM_ACCOUNTS = new Parameter<>("NUM_ACCOUNTS", 2_000, "Number of accounts in the database");
+    private static final Parameter<Integer> NUM_CUSTOMERS = new Parameter<>("NUM_CUSTOMERS", 1_000, "Number of customers in the database");
 
     @Override
     public String getName() {
@@ -50,6 +51,11 @@ public class ManyToManyRelationships implements UseCase{
     public String getReference() {
         return "https://github.com/aerospike-examples/use-case-cookbook/blob/main/UseCases/many-to-many-relationships.md";
     }
+    
+    @Override
+    public String[] getTags() {
+        return new String[] {"Transactions", "CDT Sets", "SQL Mapping"};
+    }
 
     @Override
     public void setup(IAerospikeClient client, AeroMapper mapper) throws Exception {
@@ -58,16 +64,16 @@ public class ManyToManyRelationships implements UseCase{
         
         System.out.println("Generating Customers");
         new Generator(Customer.class)
-            .generate(1, NUM_CUSTOMERS, Customer.class, mapper::save)
+            .generate(1, NUM_CUSTOMERS.get(), Customer.class, mapper::save)
             .monitor();
         
         System.out.println("\nGenerating Accounts");
         new Generator(Account.class)
-            .generate(1, NUM_ACCOUNTS, Account.class, account -> {
+            .generate(1, NUM_ACCOUNTS.get(), Account.class, account -> {
                 int numAccountOwners = ThreadLocalRandom.current().nextInt(1,8);
                 // Generate a list of the account owners
                 List<String> ownerIds = IntStream.range(1, numAccountOwners+1)
-                        .mapToObj(num -> "Cust-" + (ThreadLocalRandom.current().nextInt(NUM_CUSTOMERS) +1))
+                        .mapToObj(num -> "Cust-" + (ThreadLocalRandom.current().nextInt(NUM_CUSTOMERS.get()) +1))
                         .collect(Collectors.toList());
                 ownerIds.sort(null);
                 

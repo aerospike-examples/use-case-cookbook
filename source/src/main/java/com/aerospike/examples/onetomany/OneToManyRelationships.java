@@ -23,6 +23,7 @@ import com.aerospike.client.cdt.ListWriteFlags;
 import com.aerospike.client.policy.BatchPolicy;
 import com.aerospike.client.policy.Policy;
 import com.aerospike.client.policy.WritePolicy;
+import com.aerospike.examples.Parameter;
 import com.aerospike.examples.UseCase;
 import com.aerospike.examples.Utils;
 import com.aerospike.examples.onetomany.model.Agent;
@@ -37,8 +38,8 @@ import com.aerospike.mapper.tools.AeroMapper;
  * and how to perform bidirectional queries (from agent to listings and vice versa).
  */
 public class OneToManyRelationships implements UseCase {
-    private static final int NUM_LISTINGS = 5_000;
-    private static final int NUM_AGENTS = 1_000;
+    private static final Parameter<Integer> NUM_LISTINGS = new Parameter("NUM_LISTINGS", 5_000, "Number of real estate listings in the database");
+    private static final Parameter<Integer> NUM_AGENTS = new Parameter("NUM_AGENTS", 1_000, "Number of real estate agents in the database");
 
     @Override
     public String getName() {
@@ -52,8 +53,18 @@ public class OneToManyRelationships implements UseCase {
     }
 
     @Override
+    public String[] getTags() {
+        return new String[] {"Transactions", "CDT Sets", "SQL Mapping"};
+    }
+    
+    @Override
     public String getReference() {
         return "https://github.com/aerospike-examples/use-case-cookbook/blob/main/UseCases/one-to-many-relationships.md";
+    }
+    
+    @Override
+    public Parameter<?>[] getParams() {
+        return new Parameter<?>[] { NUM_AGENTS, NUM_LISTINGS };
     }
 
     /**
@@ -119,18 +130,18 @@ public class OneToManyRelationships implements UseCase {
         
         System.out.println("Generating Agents");
         new Generator(Agent.class)
-            .generate(1, NUM_AGENTS, Agent.class, mapper::save)
+            .generate(1, NUM_AGENTS.get(), Agent.class, mapper::save)
             .monitor();
         
         System.out.println("\nGenerating Listings");
         new Generator(Listing.class)
-            .generate(1, NUM_LISTINGS, Listing.class, mapper::save)
+            .generate(1, NUM_LISTINGS.get(), Listing.class, mapper::save)
             .monitor();
         
         System.out.println("\nAssociating listings with agents");
-        for (int i = 1; i <= NUM_LISTINGS; i++) {
+        for (int i = 1; i <= NUM_LISTINGS.get(); i++) {
             String listingId = "Listing-" + i;
-            int agentId = ThreadLocalRandom.current().nextInt(NUM_AGENTS);
+            int agentId = ThreadLocalRandom.current().nextInt(NUM_AGENTS.get());
             addListingToAgent(client, mapper, listingId, agentId);
         }
     
@@ -281,7 +292,7 @@ public class OneToManyRelationships implements UseCase {
      */
     @Override
     public void run(IAerospikeClient client, AeroMapper mapper) throws Exception {
-        long agentId = ThreadLocalRandom.current().nextInt(NUM_AGENTS) + 1;
+        long agentId = ThreadLocalRandom.current().nextInt(NUM_AGENTS.get()) + 1;
         System.out.printf("Examining listings for agent %d:\n", agentId);
         List<Listing> listings = getListings(client, mapper, agentId);
         System.out.printf("\nCurrent listings (%,d): \n", listings.size());

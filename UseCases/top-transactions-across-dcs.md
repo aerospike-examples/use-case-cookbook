@@ -1,4 +1,4 @@
-# Time series data
+# Time series data across multiple DCs
 [Back to all use cases](../README.md)
 
 [Link to working code](../source/src/main/java/com/aerospike/examples/transactionprocessing/TopTransactionsAcrossDcs.java)

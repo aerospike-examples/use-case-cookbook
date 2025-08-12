@@ -6,6 +6,11 @@ The design patterns discussed will be pertinent to any programming language in w
 ## Setup
 It is assumed that you have access to a running Aerospike cluster to work through these examples. If you don't, there are numerous ways to obtain one, including following [this blog](https://aerospike.com/blog/community-edition-aerolab/). No instruction on setting up Aerospike clusters will be provided here.
 
+To connect to your database, specify a seed node as an argument to the program. If no seed node is passed, a database running on `localhost:3000` will be assumed.
+```
+java -jar use-case-cookbook-0.8.0-full.jar localhost:3100
+```
+
 Since we will be talking about use case modeling here, we will use business objects (POJOs) to reflect real-world programming in a lot of the use cases. Besides the Aerospike library, we will include three additional projects to make the code easier to read:
 
 1. [**Project Lombok:**](https://projectlombok.org/) This excellent library provides easy ways to define business objects without needing to provide all the boilerplate code like getters and setters which are normally associated with Java POJOs. For example, a simple Account class including getters, setters and constrcutors could look like:

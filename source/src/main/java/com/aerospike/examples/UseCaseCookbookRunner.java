@@ -1,740 +1,170 @@
 package com.aerospike.examples;
 
-import java.io.IOException;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
-import java.util.Scanner;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
+import java.io.PrintWriter;
+import java.io.StringWriter;
 
+import org.apache.commons.cli.CommandLine;
+import org.apache.commons.cli.CommandLineParser;
+import org.apache.commons.cli.DefaultParser;
+import org.apache.commons.cli.HelpFormatter;
+import org.apache.commons.cli.Options;
 import org.jline.terminal.Terminal;
 import org.jline.terminal.TerminalBuilder;
 
-import com.aerospike.client.AerospikeClient;
-import com.aerospike.client.Host;
 import com.aerospike.client.IAerospikeClient;
 import com.aerospike.client.Info;
+import com.aerospike.client.Log;
 import com.aerospike.client.cluster.Node;
 import com.aerospike.client.policy.ClientPolicy;
 import com.aerospike.client.policy.WritePolicy;
-import com.aerospike.examples.gaming.Leaderboard;
-import com.aerospike.examples.gaming.PlayerMatching;
-import com.aerospike.examples.manytomany.ManyToManyRelationships;
-import com.aerospike.examples.onetomany.OneToManyRelationships;
-import com.aerospike.examples.setup.SetupDemo;
-import com.aerospike.examples.timeseries.TimeSeriesDemo;
-import com.aerospike.examples.timeseries.TimeSeriesLargeVarianceDemo;
-import com.aerospike.examples.transactionprocessing.TopTransactionsAcrossDcs;
 import com.aerospike.mapper.tools.AeroMapper;
 
+/**
+ * Main entry point for the Use Case Cookbook.
+ * This class orchestrates the different execution modes (interactive menu vs batch).
+ */
 public class UseCaseCookbookRunner {
     
-    // ANSI Color and Formatting Constants
-    private static final String RESET = "\033[0m";
-    private static final String BOLD = "\033[1m";
-    private static final String RED = "\033[31m";
-    private static final String GREEN = "\033[32m";
-    private static final String YELLOW = "\033[33m";
-    private static final String BLUE = "\033[34m";
-    private static final String MAGENTA = "\033[35m";
-    private static final String CYAN = "\033[36m";
-    private static final String WHITE = "\033[37m";
-    private static final String BLACK = "\033[30m";
-    private static final String NORMAL = "";
-    private static final String MEDIUM_GRAY = "\033[38;5;245m";
-    private static final String REVERSE = "\033[7m";
-    
-    // Background colors
-    private static final String BG_RED = "\033[41m";
-    private static final String BG_GREEN = "\033[42m";
-    private static final String BG_YELLOW = "\033[43m";
-    private static final String BG_BLUE = "\033[44m";
-    private static final String BG_MAGENTA = "\033[45m";
-    private static final String BG_CYAN = "\033[46m";
-    private static final String BG_WHITE = "\033[47m";
-    
-    // Combined colors for highlighting
-    private static final String HIGHLIGHT = BOLD + BLUE; // Blue font, bold if possible
-    
-    // Menu color scheme - change these two constants to customize the menu colors
-    private static final String COLOR1 = NORMAL;  // First alternating color
-    private static final String COLOR2 = MEDIUM_GRAY; // Second alternating color
+
     
     @SuppressWarnings("serial")
     public static class MissingNamespaceException extends RuntimeException {}
     
     /**
-     * A list of the use cases known about by this system. To add a new use case to the menu
-     * and enable it to be executed, simply add it to this list. The order in the menu will 
-     * be the same as the order in this list.
+     * Main function
+     * Supports both interactive menu mode and batch command-line execution.
      */
-    private final List<UseCase> useCases = List.of(
-            new SetupDemo(),
-            new OneToManyRelationships(),
-            new ManyToManyRelationships(),
-            new Leaderboard(),
-            new PlayerMatching(),
-            new TimeSeriesDemo(),
-            new TimeSeriesLargeVarianceDemo(),
-            new TopTransactionsAcrossDcs()
-    );
-    
-    /** The Aerospike client to use for the demonstration */
-    private final IAerospikeClient client;
-    
-    /** The mapper to use to perform repetitive tasks */
-    private final AeroMapper mapper;
-    
-    /** Currently filtered use cases for search results */
-    private List<UseCase> filteredUseCases;
-    
-    /** Current search term for highlighting */
-    private String currentSearchTerm;
-    
-    /** Whether current search is using regex */
-    private boolean isRegexSearch;
-    
-    public UseCaseCookbookRunner(IAerospikeClient client, AeroMapper mapper) {
-        this.client = client;
-        this.mapper = mapper;
-        this.filteredUseCases = new ArrayList<>(useCases);
-        this.currentSearchTerm = null;
-        this.isRegexSearch = false;
-    }
-    
-    /**
-     * Search for use cases that match the given search term.
-     * 
-     * @param searchTerm the term to search for
-     * @param useRegex whether to treat the search term as a regular expression
-     */
-    private void searchUseCases(String searchTerm, boolean useRegex) {
-        this.currentSearchTerm = searchTerm;
-        this.isRegexSearch = useRegex;
+    public static void main(String[] args) throws Exception {
+        Log.setCallbackStandard();
+        AerospikeConnector connector = new AerospikeConnector();
+        Options options = connector.getOptions();
+
+        // Add batch execution options
+        BatchExecutor.addBatchOptions(options);
+        args = BatchExecutor.correctParamNames(args);
+        options.addOption("?",  "help", false, "Show this message");
         
-        if (searchTerm == null || searchTerm.trim().isEmpty()) {
-            // Clear search - show all use cases
-            this.filteredUseCases = new ArrayList<>(useCases);
+        CommandLineParser parser = new DefaultParser();
+        CommandLine cl = parser.parse(options, args, true);
+        if (cl.hasOption("help")) {
+            usage(options);
+        }
+
+        // Handle batch commands first
+        if (BatchExecutor.handleBatchCommands(cl)) {
             return;
         }
         
-        Pattern pattern = null;
-        if (useRegex) {
-            try {
-                pattern = Pattern.compile(searchTerm, Pattern.CASE_INSENSITIVE);
-            } catch (Exception e) {
-                // Invalid regex, treat as literal search
-                pattern = Pattern.compile(Pattern.quote(searchTerm), Pattern.CASE_INSENSITIVE);
-            }
-        } else {
-            pattern = Pattern.compile(Pattern.quote(searchTerm), Pattern.CASE_INSENSITIVE);
-        }
-        
-        List<UseCase> results = new ArrayList<>();
-        for (UseCase useCase : useCases) {
-            if (matchesSearch(useCase, pattern)) {
-                results.add(useCase);
-            }
-        }
-        
-        this.filteredUseCases = results;
-    }
-    
-    /**
-     * Check if a use case matches the search pattern.
-     * 
-     * @param useCase the use case to check
-     * @param pattern the search pattern
-     * @return true if the use case matches the search
-     */
-    private boolean matchesSearch(UseCase useCase, Pattern pattern) {
-        String name = useCase.getName() != null ? useCase.getName() : "";
-        String description = useCase.getDescription() != null ? useCase.getDescription() : "";
-        String reference = useCase.getReference() != null ? useCase.getReference() : "";
-        boolean matchesTag = Arrays.stream(useCase.getTags())
-                .map(tag -> pattern.matcher(tag).find())
-                .anyMatch(b -> b);
-                
-        
-        return pattern.matcher(name).find() ||
-               pattern.matcher(description).find() ||
-               pattern.matcher(reference).find() ||
-               matchesTag;
-    }
-    
-    private String highlightTags(String text, String color) {
-        String result = text;
-        int startIndex = result.indexOf('`');
-        while (startIndex >= 0) {
-            int endIndex = result.indexOf('`', startIndex+1);
-            if (endIndex >= 0) {
-                result = result.substring(0, startIndex) + REVERSE + " " 
-                        + result.substring(startIndex+1, endIndex) + " " + RESET + color
-                        + result.substring(endIndex + 1);
-            }
-            startIndex = result.indexOf('`');
-        }
-        return result;
-    }
-    /**
-     * Highlight search terms in text using ANSI color codes, preserving the given color.
-     * 
-     * @param text the text to highlight
-     * @param preserveColor the color to preserve after highlighting
-     * @return the text with highlighted search terms
-     */
-    private String highlightSearchTermsAndSetLineColor(String text, String preserveColor) {
-        text = highlightTags(text, preserveColor);
-        if (currentSearchTerm == null || currentSearchTerm.trim().isEmpty()) {
-            return preserveColor + text + RESET;
-        }
-        
-        Pattern pattern;
-        if (isRegexSearch) {
-            try {
-                pattern = Pattern.compile(currentSearchTerm, Pattern.CASE_INSENSITIVE);
-            } catch (Exception e) {
-                // Invalid regex, treat as literal search
-                pattern = Pattern.compile(Pattern.quote(currentSearchTerm), Pattern.CASE_INSENSITIVE);
-            }
-        } else {
-            pattern = Pattern.compile(Pattern.quote(currentSearchTerm), Pattern.CASE_INSENSITIVE);
-        }
-        
-        Matcher matcher = pattern.matcher(text);
-        StringBuffer result = new StringBuffer();
-        
-        while (matcher.find()) {
-            String replacement = HIGHLIGHT + matcher.group() + RESET + preserveColor; // Yellow background, black text, then restore color
-            matcher.appendReplacement(result, replacement);
-        }
-        matcher.appendTail(result);
-        
-        return preserveColor + result.toString() + RESET;
-    }
-    
-    /**
-     * Determine the length of the longest use-case name in the filtered use cases.
-     * 
-     * @return The length of the longest use case name, or 0 if there are no use cases
-     */
-    public int getLongestUseCaseName() {
-        int longest = 0;
-        for (UseCase thisUseCase : filteredUseCases) {
-            if (thisUseCase.getName() != null && thisUseCase.getName().length() > longest) {
-                longest = thisUseCase.getName().length();
-            }
-        }
-        return longest;
-    }
-    
-    /**
-     * Pads a string to the right to fit a given width.
-     *
-     * @param text  the string to pad
-     * @param width the target width
-     * @return the right-padded string
-     */
-    private String padRight(String text, int width) {
-        if (width > 0) {
-            return String.format("%-" + width + "s", text);
-        }
-        else {
-            return text;
-        }
-    }
-
-    /**
-     * Pads a string to the left to fit a given width.
-     *
-     * @param text  the string to pad
-     * @param width the target width
-     * @return the left-padded string
-     */
-    private String padLeft(String text, int width) {
-        return String.format("%" + width + "s", text);
-    }
-
-    /**
-     * Pads a string on both sides to center it within a given width.
-     *
-     * @param text  the string to center
-     * @param width the target width
-     * @return the centered, space-padded string
-     */
-    private String padBoth(String text, int width) {
-        int totalPadding = width - text.length();
-        int left = totalPadding / 2;
-        int right = totalPadding - left;
-        return " ".repeat(left) + text + " ".repeat(right);
-    }
-
-
-
-    /**
-     * Repeats a string a specified number of times.
-     *
-     * @param s     the string to repeat
-     * @param count the number of times to repeat it
-     * @return the resulting repeated string
-     */
-    private String repeat(String s, int count) {
-        StringBuilder result = new StringBuilder(s.length() * count);
-        for (int i = 0; i < count; i++) {
-            result.append(s);
-        }
-        return result.toString();
-    }
-
-    /**
-     * Wraps a long string to fit within a specified width, preserving word boundaries.
-     * Also handles newlines in the text by treating them as forced line breaks.
-     *
-     * @param text  the text to wrap
-     * @param width the maximum width per line
-     * @return a list of wrapped lines
-     */
-    private List<String> wrapText(String text, int width) {
-        List<String> lines = new ArrayList<>();
-        
-        // First split by newlines to handle forced line breaks
-        String[] paragraphs = text.split("\n");
-        
-        for (String paragraph : paragraphs) {
-
-            // Apply word wrapping to each paragraph
-            String[] words = paragraph.split(" ");
+        // Check if a specific use case was requested
+        if (cl.hasOption("useCaseName")) {
+            String useCaseName = cl.getOptionValue("useCaseName");
             
-            if (words.length == 0) {
-                // Add a blank line
-                lines.add("");
-            }
-                else {
-                StringBuilder line = new StringBuilder();
-    
-                for (String word : words) {
-                    if (line.length() + word.length() + 1 > width) {
-                        lines.add(line.toString());
-                        line = new StringBuilder();
-                    }
-                    if (line.length() > 0) line.append(" ");
-                    line.append(word);
-                }
-                if (line.length() > 0) {
-                    lines.add(line.toString());
-                }
-            }
-        }
+            WritePolicy wp = new WritePolicy();
+            wp.sendKey = true;
+            
+            ClientPolicy clientPolicy = new ClientPolicy();
+            clientPolicy.setWritePolicyDefault(wp);
 
-        return lines;
-    }
-    
-    /**
-     * Form a full description of the use case and the reference link
-     * @param uc - The use case to display
-     * @return
-     */
-    public String formUseCaseText(UseCase uc) {
-        String result = uc.getDescription() + "\n \nSee: " + uc.getReference();
-        if (uc.getTags() != null && uc.getTags().length > 0) {
-            result += "\nTags:";
-            for (String thisTag : uc.getTags()) {
-                result += " `" + thisTag + "`";
-            }
-        }
-        return result;
-    }
-    
-
-    /**
-     * Displays the table of use cases in a formatted layout using ANSI colors.
-     *
-     * @param length - the total width of the table to display
-     */
-    public void showUseCaseDetails(int length, boolean summaryOnly) {
-        if (length < 20) {
-            System.out.println("Length too short to format table.");
-            return;
-        }
-
-        int nameWidth = getLongestUseCaseName();
-        int indexWidth = 5; // enough for 4 digits and space
-        int totalPadding = 3 * 2; // 2 spaces per column
-        int numSeparators = 4; // left edge + 3 columns
-        int descWidth = length - (indexWidth + nameWidth + totalPadding + numSeparators);
-
-        if (descWidth < 10) {
-            System.out.println("Length too small to fit content properly.");
-            return;
-        }
-        
-        if (nameWidth == 0) {
-            // No matching use cases
-            System.out.println("*** No matching use cases ***");
-            return;
-        }
-
-        String indexHeader = padBoth("No.", indexWidth);
-        String nameHeader = padBoth("Use Case", nameWidth);
-        String descHeader = padBoth("Description", descWidth);
-
-        String horizontalLine = repeat("-", length);
-        System.out.println(horizontalLine);
-        System.out.printf(BOLD + "| %s | %s | %s |" + RESET + "%n", indexHeader, nameHeader, descHeader);
-        System.out.println(horizontalLine);
-
-        for (int i = 0; i < filteredUseCases.size(); i++) {
-            UseCase uc = filteredUseCases.get(i);
-            String index = padLeft(String.valueOf(i + 1), indexWidth);
-            String color = (i % 2 == 0) ? COLOR2 : COLOR1; // alternating colors
-            String name = highlightSearchTermsAndSetLineColor(uc.getName(), color) + padRight("", nameWidth-uc.getName().length());
-            List<String> wrappedDesc = wrapText(formUseCaseText(uc), descWidth);
-
-            for (int j = 0; j < wrappedDesc.size(); j++) {
-                String descLine = padRight(wrappedDesc.get(j), descWidth);
-                String formattedLine;
-                if (j == 0) {
-                    formattedLine = String.format("| %s | %s | %s |", 
-                            highlightSearchTermsAndSetLineColor(index, color),
-                            name,
-                            highlightSearchTermsAndSetLineColor(descLine, color));
+            checkConnectionOptions(connector, cl, options);
+            
+            try (IAerospikeClient client = connector.connect(clientPolicy)) {
+                IAerospikeClient clientToUse;
+                if (!validateCluster(client)) {
+                    showClusterWarning();
+                    // Cluster does not have TEST as an SC namespace, or is < v8. Simulate transactions
+                    clientToUse = AerospikeClientProxy.wrap(client);
                 } else {
-                    formattedLine = String.format("| %s | %s | %s |", 
-                            padLeft("", indexWidth),
-                            padRight("", nameWidth),
-                            highlightSearchTermsAndSetLineColor(descLine, color));
+                    clientToUse = client;
                 }
+                AeroMapper mapper = new AeroMapper.Builder(clientToUse).build();
                 
-                System.out.println(formattedLine);
-
-                if (summaryOnly) {
-                    break;
-                }
+                // Execute the specified use case
+                BatchExecutor.executeUseCaseByName(useCaseName, cl, clientToUse, mapper);
+            } catch (MissingNamespaceException ignored) {
+                System.out.printf("\nFATAL ERROR: This demo suite expects a namespace called '%s', but no nodes "
+                        + "in the cluster at %s have this namespace", System.getProperty("demo.namespace", "test"), connector.getHosts());
             }
-            System.out.println(horizontalLine);
+            return;
         }
-    }
-    
-    public void showStartHeader() {
-        System.out.println("Here are the use cases in this repository:");
-        System.out.println("Use " + BOLD + "Command+Click" + RESET + " or " + BOLD + "Control+Click" + RESET + " to open hyperlinks in most modern terminals.");
+        
+        // Default to interactive menu mode
+        runInteractiveMode(connector, cl, options);
     }
     
     /**
-     * Runs the interactive use case menu.
-     * Displays the table and prompts the user to select a use case by number.
-     * Allows exiting by entering 0, "q", or "exit".
-     * Supports search with "search term", "s term", or "/term" (regex).
-     *
-     * @param length the total width of the table to display
+     * Run the interactive menu mode.
      */
-    public void runMenu(int length) {
-        try (Scanner scanner = new Scanner(System.in)) {
+    private static void runInteractiveMode(AerospikeConnector connector, CommandLine cl, Options options) throws Exception {
+        WritePolicy wp = new WritePolicy();
+        wp.sendKey = true;
+        
+        ClientPolicy clientPolicy = new ClientPolicy();
+        clientPolicy.setWritePolicyDefault(wp);
 
-            boolean summary = false;
-            boolean skipUseCaseDetails = false;
-            while (true) {
-                showStartHeader();
-                if (!skipUseCaseDetails) {
-                    showUseCaseDetails(length, summary);
-                }
-                skipUseCaseDetails = false;
-                
-                // Show search status if active
-                if (currentSearchTerm != null && !currentSearchTerm.trim().isEmpty()) {
-                    String searchType = isRegexSearch ? "regex" : "text";
-                    System.out.println(CYAN + "Search active: '" + currentSearchTerm + "' (" + searchType + " search)" + RESET);
-                }
-                
-                System.out.print("Enter a use case number (1 to " + filteredUseCases.size() + 
-                               "), search command, summary, help, or exit: ");
-                String input = scanner.nextLine().trim();
+        checkConnectionOptions(connector, cl, options);
         
-                // Handle exit methods
-                if (input.equalsIgnoreCase("q") || input.equalsIgnoreCase("exit") || input.equals("0")) {
-                    System.out.println("\n" + BOLD + "Exiting Use Case Menu. Goodbye!" + RESET + "\n");
-                    break;
-                }
-                
-                // Handle search commands
-                if (input.startsWith("search ") || input.startsWith("s ")) {
-                    String searchTerm = input.substring(input.indexOf(" ") + 1).trim();
-                    if (searchTerm.isEmpty()) {
-                        System.out.println("\n" + RED + "Error: Please provide a search term." + RESET + "\n");
-                    } else {
-                        searchUseCases(searchTerm, false);
-                        System.out.println("\n" + CYAN + "Searching for: '" + searchTerm + "'" + RESET + "\n");
-                    }
-                    continue;
-                }
-                
-                // Handle showing the summary of use cases
-                if (input.equalsIgnoreCase("summary")) {
-                    summary = true;
-                    continue;
-                }
-                
-                // Handle showing the full details of use cases
-                if (input.equalsIgnoreCase("full") || input.equalsIgnoreCase("details")) {
-                    summary = false;
-                    continue;
-                }
-                
-                // Handle regex search commands
-                if (input.startsWith("/")) {
-                    String searchTerm = input.substring(1).trim();
-                    if (searchTerm.isEmpty()) {
-                        System.out.println("\n" + RED + "Error: Please provide a regex pattern." + RESET + "\n");
-                    } else {
-                        searchUseCases(searchTerm, true);
-                        System.out.println("\n" + CYAN + "Regex searching for: '" + searchTerm + "'" + RESET + "\n");
-                    }
-                    continue;
-                }
-                
-                // Handle clear search
-                if (input.equalsIgnoreCase("clear") || input.equalsIgnoreCase("c")) {
-                    searchUseCases(null, false);
-                    System.out.println("\n" + CYAN + "Search cleared." + RESET + "\n");
-                    continue;
-                }
-                
-                // Handle help command
-                if (input.equalsIgnoreCase("help") || input.equalsIgnoreCase("h") || input.equals("?")) {
-                    showHelp();
-                    skipUseCaseDetails = true;
-                    continue;
-                }
-        
-                try {
-                    int selection = Integer.parseInt(input);
-                    if (selection >= 1 && selection <= filteredUseCases.size()) {
-                        invokeUseCase(selection);
-                        System.out.print("\nPress Enter to return to the menu...");
-                        scanner.nextLine(); // wait for enter
-                    } else {
-                        System.out.println("\n" + RED + "Error: Number out of range. Please try again." + RESET + "\n");
-                    }
-                } catch (NumberFormatException e) {
-                    System.out.println("\n" + RED + "Error: Invalid input. Please enter a number or search command." + RESET + "\n");
-                    showHelp();
-                }
+        try (IAerospikeClient client = connector.connect(clientPolicy)) {
+            IAerospikeClient clientToUse;
+            if (!validateCluster(client)) {
+                showClusterWarning();
+                // Cluster does not have TEST as an SC namespace, or is < v8. Simulate transactions
+                clientToUse = AerospikeClientProxy.wrap(client);
+            } else {
+                clientToUse = client;
             }
+            AeroMapper mapper = new AeroMapper.Builder(clientToUse).build();
+            
+            InteractiveMenu menu = new InteractiveMenu(clientToUse, mapper);
+            Terminal terminal = TerminalBuilder.terminal();
+            int width = terminal.getWidth();
+            if (width == 0) {
+                width = 200;
+            }
+            menu.runMenu(width);
+        } catch (MissingNamespaceException ignored) {
+            System.out.printf("\nFATAL ERROR: This demo suite expects a namespace called '%s', but no nodes "
+                    + "in the cluster at %s have this namespace", System.getProperty("demo.namespace", "test"), connector.getHosts());
+        }
+    }
+    
+    private static void checkConnectionOptions(AerospikeConnector connector, CommandLine cl, Options options) {
+        String error = connector.validateConnectionsOptions(cl);
+        if (error != null) {
+            System.out.println(error);
+            usage(options);
         }
     }
 
     /**
-     * Invoke the selected use case.
-     *
-     * @param selection the 1-based index of the selected use case from the filtered list
+     * Shows the usage
+     * @param options
      */
-    public void invokeUseCase(int selection) {
-        UseCase uc = filteredUseCases.get(selection - 1);
-        System.out.println("\n" + BOLD + "Selected Use Case #" + selection + ": " + uc.getName() + RESET + "\n");
-        
-        // Check if the use case has parameters
-        Parameter<?>[] params = uc.getParams();
-        if (params.length > 0) {
-            if (!handleParameters(uc, params)) {
-                // User cancelled parameter configuration
-                return;
-            }
-        }
-        
-        try {
-            System.out.println("\nSetting up the data for the use case...");
-            uc.setup(client, mapper);
-            
-            System.out.println("\nExecuting the use case...");
-            uc.run(client, mapper);
-        }
-        catch (Exception e) {
-            System.err.println("An error occurred during execution of the use case. The error detais are:");
-            System.err.println("   Message: " + e.getMessage());
-            System.err.println("   Class: " + e.getClass().getName());
-            System.err.println("   Stack trace:");
-            e.printStackTrace();
-            
-        }
-    }
-    
-    /**
-     * Handles parameter configuration for a use case.
-     * @param uc The use case
-     * @param params The parameters to configure
-     * @return true if the user wants to proceed, false if they cancelled
-     */
-    private boolean handleParameters(UseCase uc, Parameter<?>[] params) {
-        Scanner scanner = new Scanner(System.in);
-        
-        System.out.println(CYAN + "This use case has configurable parameters:" + RESET);
-        System.out.println();
-        
-        // Display current parameter values
-        for (int i = 0; i < params.length; i++) {
-            Parameter<?> param = params[i];
-            String description = param.getDescription();
-            if (description == null) {
-                description = "No description available";
-            }
-            System.out.printf("%s%d.%s %s%s%s = %s%s%s%n", 
-                YELLOW, i + 1, RESET,
-                BOLD, param.getName(), RESET,
-                GREEN, param.get(), RESET);
-            System.out.printf("   %s%s%s%n", MEDIUM_GRAY, description, RESET);
-        }
-        
-        System.out.println();
-        System.out.println("Options:");
-        System.out.println("  " + YELLOW + "Enter" + RESET + " - Use current parameters and run the use case");
-        System.out.println("  " + YELLOW + "1-" + params.length + RESET + " - Modify a specific parameter");
-        System.out.println("  " + YELLOW + "cancel" + RESET + " - Cancel and return to menu");
-        System.out.println();
-        
-        while (true) {
-            System.out.print(CYAN + "Enter your choice: " + RESET);
-            String input = scanner.nextLine().trim();
-            
-            if (input.isEmpty()) {
-                // User chose to use current parameters
-                return true;
-            }
-            
-            if (input.equalsIgnoreCase("cancel")) {
-                return false;
-            }
-            
-            try {
-                int paramIndex = Integer.parseInt(input) - 1;
-                if (paramIndex >= 0 && paramIndex < params.length) {
-                    if (modifyParameter(params[paramIndex], scanner)) {
-                        // Re-display parameters after modification
-                        System.out.println();
-                        System.out.println(CYAN + "Updated parameters:" + RESET);
-                        for (int i = 0; i < params.length; i++) {
-                            Parameter<?> param = params[i];
-                            String description = param.getDescription();
-                            if (description == null) {
-                                description = "No description available";
-                            }
-                            System.out.printf("%s%d.%s %s%s%s = %s%s%s%n", 
-                                YELLOW, i + 1, RESET,
-                                BOLD, param.getName(), RESET,
-                                GREEN, param.get(), RESET);
-                            System.out.printf("   %s%s%s%n", MEDIUM_GRAY, description, RESET);
-                        }
-                        System.out.println();
-                    }
-                } else {
-                    System.out.println(RED + "Invalid parameter number. Please enter 1-" + params.length + " or 'cancel'." + RESET);
-                }
-            } catch (NumberFormatException e) {
-                System.out.println(RED + "Invalid input. Please enter a number, 'cancel', or press Enter to use current parameters." + RESET);
-            }
-        }
-    }
-    
-    /**
-     * Modifies a single parameter value.
-     * @param param The parameter to modify
-     * @param scanner The scanner for user input
-     * @return true if the parameter was modified, false if cancelled
-     */
-    private boolean modifyParameter(Parameter<?> param, Scanner scanner) {
-        System.out.println();
-        System.out.printf("Modifying parameter: %s%s%s%n", BOLD, param.getName(), RESET);
-        if (param.getDescription() != null) {
-            System.out.printf("Description: %s%s%s%n", MEDIUM_GRAY, param.getDescription(), RESET);
-        }
-        System.out.printf("Current value: %s%s%s%n", GREEN, param.get(), RESET);
-        System.out.printf("Type: %s%s%s%n", YELLOW, param.get().getClass().getSimpleName(), RESET);
-        System.out.println();
-        System.out.println("Enter new value or 'cancel' to keep current value:");
-        
-        while (true) {
-            System.out.print(CYAN + "New value: " + RESET);
-            String input = scanner.nextLine().trim();
-            
-            if (input.equalsIgnoreCase("cancel")) {
-                return false;
-            }
-            
-            try {
-                Object newValue = parseValue(input, param.get().getClass());
-                setParameterValue(param, newValue);
-                System.out.println(GREEN + "Parameter updated successfully!" + RESET);
-                return true;
-            } catch (IllegalArgumentException e) {
-                System.out.println(RED + "Invalid value: " + e.getMessage() + RESET);
-                System.out.println("Please enter a valid " + param.get().getClass().getSimpleName() + " value or 'cancel'.");
-            }
-        }
-    }
-    
-    /**
-     * Parses a string value to the appropriate type.
-     * @param input The input string
-     * @param targetType The target type
-     * @return The parsed value
-     * @throws IllegalArgumentException if the value cannot be parsed
-     */
-    private Object parseValue(String input, Class<?> targetType) {
-        if (targetType == String.class) {
-            return input;
-        } else if (targetType == Integer.class || targetType == int.class) {
-            return Integer.parseInt(input);
-        } else if (targetType == Long.class || targetType == long.class) {
-            return Long.parseLong(input);
-        } else if (targetType == Double.class || targetType == double.class) {
-            return Double.parseDouble(input);
-        } else if (targetType == Float.class || targetType == float.class) {
-            return Float.parseFloat(input);
-        } else if (targetType == Boolean.class || targetType == boolean.class) {
-            return Boolean.parseBoolean(input);
-        } else {
-            throw new IllegalArgumentException("Unsupported type: " + targetType.getSimpleName());
-        }
-    }
-    
-    /**
-     * Sets the value of a parameter using reflection.
-     * @param param The parameter
-     * @param value The new value
-     */
-    private void setParameterValue(Parameter<?> param, Object value) {
-        try {
-            // Use reflection to access the private 'value' field
-            java.lang.reflect.Field valueField = Parameter.class.getDeclaredField("value");
-            valueField.setAccessible(true);
-            valueField.set(param, value);
-        } catch (Exception e) {
-            throw new RuntimeException("Failed to set parameter value", e);
-        }
-    }
-    
-    /**
-     * Display help information for search commands.
-     */
-    private void showHelp() {
-        System.out.println("Help commands:");
-        System.out.println("  help           - Show this help text");
-        System.out.println("Display commands:");
-        System.out.println("  summary        - Show only summary (one line) use case descriptions");
-        System.out.println("  full / details - Show detailed use case descriptions");
-        System.out.println("Search commands:");
-        System.out.println("  search <term>  - Search for term in names, descriptions, and URLs");
-        System.out.println("  s <term>       - Short form of search");
-        System.out.println("  /<regex>       - Search using regular expression");
-        System.out.println("  clear          - Clear search and show all use cases");
-        System.out.println("Running a use case:");
-        System.out.println("  <shown number> - Execute the use case with the specified number");
-        System.out.println("                  (If the use case has parameters, you'll be prompted to configure them)");
-        System.out.println("Exiting the program:");
-        System.out.println("  exit / quit    - Show this help text");
-        System.out.println();
+    private static void usage(Options options) {
+        HelpFormatter formatter = new HelpFormatter();
+        StringWriter sw = new StringWriter();
+        PrintWriter pw = new PrintWriter(sw);
+        String syntax = UseCaseCookbookRunner.class.getName() + " [<options>]";
+        formatter.printHelp(pw, 100, syntax, "options:", options, 0, 2, null);
+        System.out.println(sw.toString());
+        System.out.println("If no use case is specified with the '-uc' option, an interactive menu will be shown.");
+        System.exit(1);
     }
 
+    /**
+     * Show a warning to the user if the connected cluster does not have transactional support.
+     */
+    private static void showClusterWarning() {
+        String namespace = System.getProperty("demo.namespace", "test");
+        System.out.println(AnsiColors.RED + "*************");
+        System.out.println("*  WARNING  *");
+        System.out.println("*************" + AnsiColors.RESET);
+        System.out.println("Some of the demonstrations in this program require transaction support. "
+                + "Transactions require Aerospike version 8+ and the namespace ('"+namespace+"') must be "
+                + "configured to support strong consistency (an enterprise edition enhancement). "
+                + "Your cluster does not meet these requirements. The demonstrations will still "
+                + "run, but transaction support will be disabled.\n");
+    }
+    
     /**
      * Validate that the cluster is set up correctly to run this application. There are two requirements:
      * <ul>
@@ -787,63 +217,4 @@ public class UseCaseCookbookRunner {
         }
         return true;
     }
-    
-    /**
-     * Show a warning to the user if the connected cluster does not have transactional support.
-     */
-    private static void showClusterWarning() {
-        String namespace = System.getProperty("demo.namespace", "test");
-        System.out.println(RED + BOLD + "*************");
-        System.out.println("*  WARNING  *");
-        System.out.println("*************" + RESET);
-        System.out.println("Some of the demonstrations in this program require transaction support. "
-                + "Transactions require Aerospike version 8+ and the namespace ('"+namespace+"') must be "
-                + "configured to support strong consistency (an enterprise edition enhancement). "
-                + "Your cluster does not meet these requirements. The demonstrations will still "
-                + "run, but transaction support will be disabled.\n");
-    }
-    
-    /**
-     * Main function
-     * At the moment only one argument is accepted, the host and port of the cluster. By default this is
-     * "localhost:3000". Currently there is no way to attach to secured clusters.
-     */
-    public static void main(String[] args) throws IOException {
-        String hosts = "localhost:3000";
-        if (args.length == 1) {
-            hosts = args[0];
-        }
-        Host[] hostList = Host.parseHosts(hosts, 3000);
-        WritePolicy wp = new WritePolicy();
-        wp.sendKey = true;
-        
-        ClientPolicy clientPolicy = new ClientPolicy();
-        clientPolicy.setWritePolicyDefault(wp);
-        
-        try (IAerospikeClient client = new AerospikeClient(clientPolicy, hostList)) {
-            IAerospikeClient clientToUse;
-            if (!validateCluster(client)) {
-                showClusterWarning();
-                // Cluster does not have TEST as an SC namespace, or is < v8. Simulate transaactions
-                clientToUse = AerospikeClientProxy.wrap(client);
-            }
-            else {
-                clientToUse = client;
-            }
-            AeroMapper mapper = new AeroMapper.Builder(clientToUse).build();
-            UseCaseCookbookRunner runner = new UseCaseCookbookRunner(clientToUse, mapper);
-            Terminal terminal = TerminalBuilder.terminal();
-            int width = terminal.getWidth();
-            if (width == 0) {
-                width = 200;
-            }
-            runner.runMenu(width);
-        }
-        catch (MissingNamespaceException ignored) {
-            System.out.printf("\nFATAL ERROR: This demo suite expects a namespace called '%s', but no nodes "
-                    + "in the cluster at %s have this namespace", System.getProperty("demo.namespace", "test"), hosts);
-        }
-    }
-
-
 }

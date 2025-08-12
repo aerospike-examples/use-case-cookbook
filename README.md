@@ -47,7 +47,7 @@ First step is to create a data model:
 @NoArgsConstructor
 @AllArgsConstructor
 @GenMagic
-@AerospikeRecord(namespace = "test", set = "account")
+@AerospikeRecord(namespace = "test", set = "uccb_account")
 public class Account {
     @AerospikeKey
     private UUID id;
@@ -64,9 +64,7 @@ Then, to create and save the objects, you can use:
 ```java
 AeroMapper mapper = new AeroMapper.Builder(client).build();
 new Generator(Account.class)
-    .generate(1, 10_000, 0, Account.class, account -> {
-        mapper.save(account);
-    })
+    .generate(1, 10_000, 0, Account.class, maper::save)
     .monitor();
 ```
 
@@ -84,7 +82,7 @@ This will create output similar to:
 
 Now if you run AQL you should see the records there:
 ```
-aql> select * from test.account
+aql> select * from test.uccb_account
 +-----------------------------------+----------------+---------------+----------------------------------------+
 | accountName                       | balanceInCents | dateOpened    | id                                     |
 +-----------------------------------+----------------+---------------+----------------------------------------+
@@ -102,6 +100,8 @@ Great! We have generated 10,000 records. If you wanted to make the account balan
 @GenNumber(start = 50000, end = 2000000)
 private int balanceInCents;
 ```
+Note that the set name is prefixed with "uccb" which is short for "Use Case CookBook". The demos truncate the sets before using them, so having a longer name which will not conflict with any other data you might have is a good idea!
+
 Now setup is complete and you can run the examples, explore the use cases!
 
 # Use Cases

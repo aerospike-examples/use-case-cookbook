@@ -251,7 +251,7 @@ public class OneToManyRelationships implements UseCase {
                         .toArray(Key[]::new);
                 
                 // Perform a batch read to read all the listing
-                BatchPolicy batchPolicy = client.getBatchPolicyDefault();
+                BatchPolicy batchPolicy = client.copyBatchPolicyDefault();
                 batchPolicy.txn = txn;
                 Record[] listings = client.get(batchPolicy, keys);
                 

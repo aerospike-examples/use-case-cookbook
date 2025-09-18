@@ -1,7 +1,6 @@
 package com.aerospike.examples;
 
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 import java.util.Scanner;
 import java.util.regex.Matcher;
@@ -138,6 +137,27 @@ public class InteractiveMenu {
         System.out.println("==============================");
         System.out.println();
     }
+
+    private String formatColors(String str, String color) {
+        return color + highlightSearchTerms(str, color) + AnsiColors.RESET;
+    }
+    private String formatLine(String indexStr, String nameStr, String descStr, String format) {
+        return String.format("| %s | %s | %s |", 
+                formatColors(indexStr, format), 
+                formatColors(nameStr, format), 
+                formatColors(descStr, format));
+    }
+    
+    private String formTagsString(String[] tags, String color) {
+        StringBuffer sb = new StringBuffer().append("Tags: ");
+        for (String tag : tags) {
+            if (sb.length() > 0) {
+                sb.append(' ');
+            }
+            sb.append(AnsiColors.REVERSE).append(tag).append(AnsiColors.RESET).append(color);
+        }
+        return sb.toString();
+    }
     
     /**
      * Show use case details in a formatted table.
@@ -150,18 +170,21 @@ public class InteractiveMenu {
             return;
         }
         
+        final int columnSpaces = 6;
+        final int columnChars = 4;
         int longestName = getLongestUseCaseName();
         int indexWidth = String.valueOf(filteredUseCases.size()).length();
-        int nameWidth = Math.min(longestName + 2, 50);
-        int descWidth = width - indexWidth - nameWidth - 8; // Account for formatting characters
+        int nameWidth = Math.min(longestName, 50);
+        int descWidth = width - indexWidth - nameWidth - columnChars - columnSpaces;
         
-        String indexHeader = padLeft("#", indexWidth);
-        String nameHeader = padLeft("Name", nameWidth);
-        String descHeader = padLeft(summary ? "Summary" : "Description", descWidth);
+        String indexHeader = padCenter("#", indexWidth);
+        String nameHeader = padCenter("Name", nameWidth);
+        String descHeader = padCenter(summary ? "Summary" : "Description", descWidth);
         
         String horizontalLine = repeat("-", width);
         System.out.println(horizontalLine);
-        System.out.printf(AnsiColors.BOLD + "| %s | %s | %s |" + AnsiColors.RESET + "%n", indexHeader, nameHeader, descHeader);
+        System.out.println(formatLine(indexHeader, nameHeader, descHeader, AnsiColors.BOLD));
+        
         System.out.println(horizontalLine);
         
         for (int i = 0; i < filteredUseCases.size(); i++) {
@@ -173,19 +196,28 @@ public class InteractiveMenu {
             
             for (int j = 0; j < wrappedDesc.size(); j++) {
                 String descLine = padRight(wrappedDesc.get(j), descWidth);
-                String formattedLine;
                 if (j == 0) {
-                    formattedLine = String.format("| %s | %s | %s |", index, name, descLine);
+                    System.out.println(formatLine(index, name, descLine, color));
                 } else {
-                    formattedLine = String.format("| %s | %s | %s |", 
+                    System.out.println(formatLine(
                             padLeft("", indexWidth),
                             padRight("", nameWidth),
-                            descLine);
+                            descLine, color));
                 }
-                
-                // Apply highlighting to the formatted line
-                String highlightedLine = highlightTableLine(formattedLine, color, j == 0);
-                System.out.println(color + highlightedLine + AnsiColors.RESET);
+            }
+            if (uc.getReference() != null) {
+                System.out.println(formatLine( 
+                        padLeft("", indexWidth),
+                        padRight("", nameWidth),
+                        padRight("See: " + uc.getReference(), descWidth),
+                        color));
+            }
+            if (uc.getTags() != null && uc.getTags().length > 0) {
+                System.out.println(formatLine(
+                        padLeft("", indexWidth),
+                        padRight("", nameWidth),
+                        padRight(formTagsString(uc.getTags(), color), descWidth),
+                        color));
             }
             System.out.println(horizontalLine);
         }
@@ -259,7 +291,21 @@ public class InteractiveMenu {
      * @return The padded string
      */
     private String padRight(String text, int width) {
-        return String.format("%-" + width + "s", text);
+        int extraChars = 0;
+        int startIndex = text.indexOf("\033");
+        while (startIndex > 0) {
+            int endIndex = text.indexOf('m', startIndex);
+            extraChars += endIndex - startIndex + 1;
+            startIndex = text.indexOf("\033", endIndex);
+        }
+        return String.format("%-" + (width+extraChars) + "s", text);
+    }
+    
+    private String padCenter(String text, int width) {
+        int strLength = text.length();
+        int leftPadding = Math.max(0, (width - strLength)/2);
+        int rightPadding = Math.max(0, width - leftPadding - strLength);
+        return repeat(" ", leftPadding) + text + repeat(" ", rightPadding);
     }
     
     /**
@@ -280,63 +326,6 @@ public class InteractiveMenu {
      */
     private String repeat(String ch, int count) {
         return ch.repeat(count);
-    }
-    
-    /**
-     * Highlight search terms in a table line.
-     * @param line The line to highlight
-     * @param color The base color for the line
-     * @param isFirstLine Whether this is the first line of a use case
-     * @return The highlighted line
-     */
-    private String highlightTableLine(String line, String color, boolean isFirstLine) {
-        if (currentSearchTerm == null || currentSearchTerm.trim().isEmpty()) {
-            return line;
-        }
-        
-        // Find the positions of the actual text content (not padding)
-        // The line format is: "| index | name | description |"
-        String[] parts = line.split("\\|");
-        if (parts.length < 4) {
-            return line; // Not a valid table line
-        }
-        
-        // Extract the content parts (trim whitespace)
-        String indexPart = parts[1].trim();
-        String namePart = parts[2].trim();
-        String descPart = parts[3].trim();
-        
-        // Highlight each part separately
-        String highlightedIndex = highlightSearchTerms(indexPart, color);
-        String highlightedName = highlightSearchTerms(namePart, color);
-        String highlightedDesc = highlightSearchTerms(descPart, color);
-        
-        // Apply bold formatting to name if it's the first line
-        if (isFirstLine && !namePart.isEmpty()) {
-            highlightedName = AnsiColors.BOLD + highlightedName + AnsiColors.RESET + color;
-        }
-        
-        // Reconstruct the line with proper padding
-        // Calculate visual length (without ANSI codes) for proper padding
-        int indexVisualLength = indexPart.length();
-        int nameVisualLength = namePart.length();
-        int descVisualLength = descPart.length();
-        
-        // Add padding to match the original visual length
-        String indexPadded = highlightedIndex + " ".repeat(Math.max(0, indexVisualLength - getVisualLength(highlightedIndex)));
-        String namePadded = highlightedName + " ".repeat(Math.max(0, nameVisualLength - getVisualLength(highlightedName)));
-        String descPadded = highlightedDesc + " ".repeat(Math.max(0, descVisualLength - getVisualLength(highlightedDesc)));
-        
-        return "| " + indexPadded + " | " + namePadded + " | " + descPadded + " |";
-    }
-    
-    /**
-     * Get the visual length of a string (ignoring ANSI codes).
-     * @param text The text to measure
-     * @return The visual length
-     */
-    private int getVisualLength(String text) {
-        return text.replaceAll("\033\\[[0-9;]*[a-zA-Z]", "").length();
     }
     
     /**
@@ -419,7 +408,8 @@ public class InteractiveMenu {
     private boolean matchesSearch(UseCase useCase, Pattern pattern) {
         return pattern.matcher(useCase.getName()).find() ||
                pattern.matcher(useCase.getDescription()).find() ||
-               pattern.matcher(useCase.getReference()).find();
+               pattern.matcher(useCase.getReference()).find() || 
+               pattern.matcher(String.join(" ", useCase.getTags())).find();
     }
     
     /**

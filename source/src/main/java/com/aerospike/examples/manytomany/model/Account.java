@@ -13,7 +13,7 @@ import lombok.Data;
 
 @Data
 @GenMagic
-@AerospikeRecord(namespace = "${demo.namespace:test}", set = "uccb_account")
+@AerospikeRecord(namespace = "${demo.namespace:test}", set = "uccb_account",shortName = "Acct")
 public class Account {
     @AerospikeKey
     private UUID id;

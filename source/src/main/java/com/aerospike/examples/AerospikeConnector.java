@@ -199,7 +199,7 @@ public class AerospikeConnector {
         this.tls = parseTlsOptions(cl.getOptionValue("tls"));
         this.authMode = AuthMode.valueOf(cl.getOptionValue("authMode", "INTERNAL").toUpperCase());
         this.clusterName = cl.getOptionValue("clusterName");
-        this.servicesAlternate = cl.hasOption("useServicesAlternate1");
+        this.servicesAlternate = cl.hasOption("useServicesAlternate");
 
         if (this.hosts == null) {
             return "Hosts must be specified";

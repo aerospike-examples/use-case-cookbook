@@ -32,7 +32,7 @@ import com.aerospike.examples.manytomany.model.Customer;
 import com.aerospike.generator.Generator;
 import com.aerospike.mapper.tools.AeroMapper;
 
-public class ManyToManyRelationships implements UseCase{
+public class ManyToManyRelationships implements UseCase {
     private static final Parameter<Integer> NUM_ACCOUNTS = new Parameter<>("NUM_ACCOUNTS", 2_000, "Number of accounts in the database");
     private static final Parameter<Integer> NUM_CUSTOMERS = new Parameter<>("NUM_CUSTOMERS", 1_000, "Number of customers in the database");
 
@@ -55,6 +55,11 @@ public class ManyToManyRelationships implements UseCase{
     @Override
     public String[] getTags() {
         return new String[] {"Transactions", "CDT Sets", "SQL Mapping"};
+    }
+    
+    @Override
+    public Parameter<?>[] getParams() {
+        return new Parameter<?>[] {NUM_ACCOUNTS, NUM_CUSTOMERS};
     }
 
     @Override

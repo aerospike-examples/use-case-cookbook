@@ -23,6 +23,7 @@ import com.aerospike.client.exp.ExpReadFlags;
 import com.aerospike.client.exp.MapExp;
 import com.aerospike.client.policy.WritePolicy;
 import com.aerospike.examples.Async;
+import com.aerospike.examples.Parameter;
 import com.aerospike.examples.UseCase;
 import com.aerospike.examples.Utils;
 import com.aerospike.examples.gaming.model.Player;
@@ -34,12 +35,15 @@ public class Leaderboard implements UseCase {
     private static final MapPolicy MAP_POLICY = new MapPolicy(MapOrder.KEY_ORDERED, MapWriteFlags.DEFAULT);
     
     private static final int SCORES_PER_BUCKET = 25;
-    private static final int NUM_PLAYERS = 100_000;
-    private static final int MAX_BUCKETS = 6300/SCORES_PER_BUCKET;
+    private static final Parameter<Integer> NUM_PLAYERS = new Parameter<>("NUM_PLAYERS", 100_000, "Numberof players in the simulation");
+    private static final int MAX_SCORE = 6300; 
+    private static final int MAX_BUCKETS = MAX_SCORE/SCORES_PER_BUCKET;
     
-    private static final int NUM_THREADS = 50;
+    private static final Parameter<Integer> NUM_THREADS = new Parameter<>("NUM_THREADS", 50, "Number of threads to concurrently update the simulation with");
     private static final int PLAYER1_UPDATE_PERIOD = 50; //ms
     private static final int THREAD_UPDATE_PERIOD = 5; //ms
+    private static final Parameter<Integer> RUNTIME_SECS = new Parameter<>("RUNTIME_SECS", 20, "Duration of the run in seconds");
+
     private static final int SCOREBOARD_DISPLAY_PERIOD = 3; //secs
     private String playerNamespace;
     private String playerSet;
@@ -61,7 +65,7 @@ public class Leaderboard implements UseCase {
                 + "their socre every %,d milliseonds, and showing the scoreboard around their score every %d seconds. "
                 + "Additionally there are %,d background threads which are randomly updating other scores every %,dms "
                 + "per thread.",
-                PLAYER1_UPDATE_PERIOD, SCOREBOARD_DISPLAY_PERIOD, NUM_THREADS, THREAD_UPDATE_PERIOD);
+                PLAYER1_UPDATE_PERIOD, SCOREBOARD_DISPLAY_PERIOD, NUM_THREADS.get(), THREAD_UPDATE_PERIOD);
     }
     
     @Override
@@ -74,6 +78,11 @@ public class Leaderboard implements UseCase {
         return new String[] {"Transactions", "Map Operations", "Expressions" };
     }
 
+    @Override
+    public Parameter<?>[] getParams() {
+        return new Parameter<?>[] {NUM_PLAYERS, NUM_THREADS, RUNTIME_SECS};
+    }
+    
     public void setDefaultValues(AeroMapper mapper) {
         this.playerNamespace = mapper.getNamespace(Player.class);
         this.playerSet = mapper.getSet(Player.class);
@@ -87,9 +96,9 @@ public class Leaderboard implements UseCase {
         client.truncate(null, playerNamespace, playerSet, null); 
         client.truncate(null, scoreboardNamespace, scoreboardSet, null); 
         
-        System.out.printf("Generating %,d Players\n", NUM_PLAYERS);
+        System.out.printf("Generating %,d Players\n", NUM_PLAYERS.get());
         new Generator(Player.class)
-            .generate(1, NUM_PLAYERS, Player.class, player -> {
+            .generate(1, NUM_PLAYERS.get(), Player.class, player -> {
               mapper.save(player);
               updatePlayerScore(client, player.getId(), -1, player.getScore(), null);
             })
@@ -103,10 +112,10 @@ public class Leaderboard implements UseCase {
         final int playerId = res.getInt("id");
         showPlayersAroundPlayer(client, playerId, score);
         
-        System.out.println("\nStarting gaming for 20s...\n");
+        System.out.printf("%nStarting gaming for %ds...%n", RUNTIME_SECS.get());
         final AtomicInteger scoreVal = new AtomicInteger(score);
         
-        Async.runFor(Duration.ofSeconds(20), (async) -> {
+        Async.runFor(Duration.ofSeconds(RUNTIME_SECS.get()), (async) -> {
             // Show the scoreboard every 2 seconds.
             async.periodic(Duration.ofSeconds(SCOREBOARD_DISPLAY_PERIOD), () -> {
                 // Ensure that player 1's score does not change while reading the scoreboard data! (Could be
@@ -130,7 +139,7 @@ public class Leaderboard implements UseCase {
             // To run the updating of a random player's score as fast as possible use the following code
 //            async.continuous(NUM_THREADS, () -> {
 //                // Ensure we do not update player 1's score in this thread
-//                int playerIdToChange = async.rand().nextInt(NUM_PLAYERS-1)+2;
+//                int playerIdToChange = async.rand().nextInt(NUM_PLAYERS.get()-1)+2;
 //                Record record = client.get(null, new Key(playerNamespace, playerSet, playerIdToChange));
 //                if (record != null) {
 //                    int currentScore = record.getInt("score");
@@ -140,9 +149,9 @@ public class Leaderboard implements UseCase {
 //            });
 
             // Update a random player's score
-            async.periodic(Duration.ofMillis(THREAD_UPDATE_PERIOD), NUM_THREADS, () -> {
+            async.periodic(Duration.ofMillis(THREAD_UPDATE_PERIOD), NUM_THREADS.get(), () -> {
                 // Ensure we do not update player 1's score in this thread
-                int playerIdToChange = async.rand().nextInt(NUM_PLAYERS-1)+2;
+                int playerIdToChange = async.rand().nextInt(NUM_PLAYERS.get()-1)+2;
                 Record record = client.get(null, new Key(playerNamespace, playerSet, playerIdToChange));
                 if (record != null) {
                     int currentScore = record.getInt("score");

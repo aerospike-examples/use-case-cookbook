@@ -209,6 +209,11 @@ public class InteractiveMenu {
                 System.out.println(formatLine( 
                         padLeft("", indexWidth),
                         padRight("", nameWidth),
+                        padRight("", descWidth),
+                        color));
+                System.out.println(formatLine( 
+                        padLeft("", indexWidth),
+                        padRight("", nameWidth),
                         padRight("See: " + uc.getReference(), descWidth),
                         color));
             }
@@ -250,35 +255,43 @@ public class InteractiveMenu {
     
     /**
      * Wrap text to fit within a specified width.
+     * Preserves explicit newlines in the text.
      * @param text The text to wrap
      * @param width The maximum width
      * @return List of wrapped lines
      */
     private List<String> wrapText(String text, int width) {
         List<String> lines = new ArrayList<>();
-        String[] words = text.split("\\s+");
-        StringBuilder currentLine = new StringBuilder();
         
-        for (String word : words) {
-            if (currentLine.length() + word.length() + 1 <= width) {
-                if (currentLine.length() > 0) {
-                    currentLine.append(" ");
-                }
-                currentLine.append(word);
-            } else {
-                if (currentLine.length() > 0) {
-                    lines.add(currentLine.toString());
-                    currentLine = new StringBuilder(word);
+        // First split by explicit newlines to preserve them
+        String[] paragraphs = text.split("\\n");
+        
+        for (String paragraph : paragraphs) {
+            // Then wrap each paragraph independently
+            String[] words = paragraph.split("\\s+");
+            StringBuilder currentLine = new StringBuilder();
+            
+            for (String word : words) {
+                if (currentLine.length() + word.length() + 1 <= width) {
+                    if (currentLine.length() > 0) {
+                        currentLine.append(" ");
+                    }
+                    currentLine.append(word);
                 } else {
-                    // Word is longer than width, split it
-                    lines.add(word.substring(0, width));
-                    currentLine = new StringBuilder(word.substring(width));
+                    if (currentLine.length() > 0) {
+                        lines.add(currentLine.toString());
+                        currentLine = new StringBuilder(word);
+                    } else {
+                        // Word is longer than width, split it
+                        lines.add(word.substring(0, width));
+                        currentLine = new StringBuilder(word.substring(width));
+                    }
                 }
             }
-        }
-        
-        if (currentLine.length() > 0) {
-            lines.add(currentLine.toString());
+            
+            if (currentLine.length() > 0) {
+                lines.add(currentLine.toString());
+            }
         }
         
         return lines;
@@ -418,7 +431,7 @@ public class InteractiveMenu {
      */
     private void invokeUseCase(int selection) {
         UseCase uc = filteredUseCases.get(selection - 1);
-        executor.executeUseCase(uc, true); // true = interactive
+        executor.executeUseCase(uc, true, false, false); // true = interactive
     }
     
     /**

@@ -59,6 +59,14 @@ public class UseCaseCookbookRunner {
         if (cl.hasOption("useCaseName")) {
             String useCaseName = cl.getOptionValue("useCaseName");
             
+            boolean runOnly = cl.hasOption("runOnly");
+            boolean seedOnly = cl.hasOption("seedOnly");
+            
+            if (runOnly && seedOnly) {
+                System.out.println("Both 'runOnly' and 'seedOnly' cannot be specified.");
+                usage(options);
+            }
+            
             WritePolicy wp = new WritePolicy();
             wp.sendKey = true;
             
@@ -79,7 +87,7 @@ public class UseCaseCookbookRunner {
                 AeroMapper mapper = new AeroMapper.Builder(clientToUse).build();
                 
                 // Execute the specified use case
-                BatchExecutor.executeUseCaseByName(useCaseName, cl, clientToUse, mapper);
+                BatchExecutor.executeUseCaseByName(useCaseName, cl, clientToUse, mapper, seedOnly, runOnly);
             } catch (MissingNamespaceException ignored) {
                 System.out.printf("\nFATAL ERROR: This demo suite expects a namespace called '%s', but no nodes "
                         + "in the cluster at %s have this namespace", System.getProperty("demo.namespace", "test"), connector.getHosts());

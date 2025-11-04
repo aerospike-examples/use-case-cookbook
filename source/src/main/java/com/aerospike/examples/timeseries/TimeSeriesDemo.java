@@ -699,7 +699,7 @@ public class TimeSeriesDemo implements UseCase, AutoCloseable {
      * @return A generated event
      */
     public Event generateSampleEvent(String accountId, String deviceId) {
-        Event event = eventCreator.createAndPopulate(new HashMap<>(Map.of("Key", 1)));
+        Event event = eventCreator.createAndPopulate(Map.of("Key", 1));
         
         // Create a 25-character event ID from timestamp and random number
         long timestamp = event.getTimestamp().getTime();

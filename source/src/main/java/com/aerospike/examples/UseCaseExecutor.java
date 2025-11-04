@@ -27,7 +27,7 @@ public class UseCaseExecutor {
      * @param interactive Whether to allow interactive parameter configuration
      * @return true if execution was successful, false if cancelled
      */
-    public boolean executeUseCase(UseCase useCase, boolean interactive) {
+    public boolean executeUseCase(UseCase useCase, boolean interactive, boolean seedOnly, boolean runOnly) {
         System.out.println("\n" + AnsiColors.BOLD + "Executing Use Case: " + useCase.getName() + AnsiColors.RESET + "\n");
         
         // Check if the use case has parameters
@@ -49,12 +49,14 @@ public class UseCaseExecutor {
         }
         
         try {
-            System.out.println("\nSetting up the data for the use case...");
-            useCase.setup(client, mapper);
-            
-            System.out.println("\nExecuting the use case...");
-            useCase.run(client, mapper);
-            
+            if (!runOnly) {
+                System.out.println("\nSetting up the data for the use case...");
+                useCase.setup(client, mapper);
+            }
+            if (!seedOnly) {
+                System.out.println("\nExecuting the use case...");
+                useCase.run(client, mapper);
+            }            
             System.out.println(AnsiColors.GREEN + "\nUse case completed successfully!" + AnsiColors.RESET);
             return true;
         } catch (Exception e) {

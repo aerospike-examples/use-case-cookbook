@@ -30,7 +30,8 @@ import com.aerospike.generator.Generator;
 import com.aerospike.mapper.tools.AeroMapper;
 
 public class PlayerMatching implements UseCase {
-    private static final Parameter<Integer> NUM_PLAYERS = new Parameter<>("NUM_PLAYERS", 10_000, "THe number of players in the simulation");
+    private static final Parameter<Integer> NUM_PLAYERS = new Parameter<>("NUM_PLAYERS", 10_000, "The number of players in the simulation");
+    private static final Parameter<Integer> RUNTIME_SECS = new Parameter<>("RUNTIME_SECS", 10, "The amount of time to run the simulation in seconds");
     private static long shieldDurationMs = TimeUnit.SECONDS.toMillis(5);
     private String playerNamespace;
     private String playerSet;
@@ -75,15 +76,17 @@ public class PlayerMatching implements UseCase {
 
     @Override
     public Parameter<?>[] getParams() {
-        return new Parameter<?>[] {NUM_PLAYERS};
+        return new Parameter<?>[] {NUM_PLAYERS, RUNTIME_SECS};
     }
     
-    @Override
-    public void setup(IAerospikeClient client, AeroMapper mapper) throws Exception {
-        this.leaderboard.setDefaultValues(mapper);
+    private void setup(AeroMapper mapper) {
+        leaderboard.setDefaultValues(mapper);
         playerNamespace = mapper.getNamespace(Player.class);
         playerSet = mapper.getSet(Player.class);
-        
+    }
+    @Override
+    public void setup(IAerospikeClient client, AeroMapper mapper) throws Exception {
+        setup(mapper);
         client.truncate(null, playerNamespace, playerSet, null);
         client.truncate(null, this.leaderboard.getScoreboardNamespace(), this.leaderboard.getScoreboardSet(), null);
         
@@ -98,7 +101,8 @@ public class PlayerMatching implements UseCase {
 
     @Override
     public void run(IAerospikeClient client, AeroMapper mapper) throws Exception {
-         testEligibility(client);
+        setup(mapper);
+        testEligibility(client);
         
         System.out.printf("\nLet's play some games!\n");
         Player player1 = setPlayerOnline(client, 1, true);
@@ -106,7 +110,7 @@ public class PlayerMatching implements UseCase {
         leaderboard.showPlayersAroundPlayer(client, player1.getId(), player1.getScore());
         
         AtomicInteger counter = new AtomicInteger();
-        Async.runFor(Duration.ofSeconds(10), (async) -> {
+        Async.runFor(Duration.ofSeconds(RUNTIME_SECS.get()), (async) -> {
             async.periodic(Duration.ofMillis(100), () -> {
                 findPlayerToAttack(client, player1).ifPresent(defender -> {
                     playGame(client, player1, defender, true);
@@ -274,7 +278,7 @@ public class PlayerMatching implements UseCase {
             }
         }
         attacker.setShieldExpiry(0);
-        defender.setBeingAttackedBy("");
+        defender.setBeingAttackedBy(null);
 
         Utils.doInTransaction(client, txn -> {
             WritePolicy wp = client.copyWritePolicyDefault();

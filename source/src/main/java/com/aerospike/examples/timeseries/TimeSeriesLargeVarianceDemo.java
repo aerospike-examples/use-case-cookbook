@@ -163,7 +163,7 @@ public class TimeSeriesLargeVarianceDemo implements UseCase, AutoCloseable {
     @Override
     public String getDescription() {
         return "Demonstrates how to store, update and query time-series data when there can be a large disparity "
-                + "in the events for devices. This is applicable to many ad-hoc time series events like "
+                + "in the events for devices. This is applicable to many ad-hoc time series events like identifying fraud in "
                 + "credit card swipes. (Consumers might do 20 a day, businesses could do 100,000). In this case the data is "
                 + "devices which generate events. These devices could be motion sensors, cameras, etc. "
                 + "The data model has many accounts, each account has a handful of devices, and the devices "
@@ -1096,7 +1096,7 @@ public class TimeSeriesLargeVarianceDemo implements UseCase, AutoCloseable {
      * @return A generated event
      */
     public Event generateSampleEvent(String accountId, String deviceId) {
-        Event event = eventCreator.createAndPopulate(new HashMap<>(Map.of("Key", 1)));
+        Event event = eventCreator.createAndPopulate(Map.of("Key", 1));
         
         // Create a 25-character event ID from timestamp and random number
         long timestamp = event.getTimestamp().getTime();

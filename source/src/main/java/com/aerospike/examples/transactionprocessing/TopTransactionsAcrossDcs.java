@@ -39,7 +39,7 @@ public class TopTransactionsAcrossDcs implements UseCase {
     public static final Parameter<Long> NUM_ACCOUNTS = new Parameter<>("NUM_ACCOUNTS", 1_000l, "Number of accounts to use");
     public static final Parameter<Integer> SIMULATION_DAYS = new Parameter<>("SIMULATION_DAYS", 30, "How many days to cover in the simulation");
     public static final Parameter<Integer> MAX_TRANSACTIONS = new Parameter<>("MAX_TRANSACTIONS", 50, "How many most recent transactions to retrieve");
-    public static final Parameter<Long> RUN_DURATION_SECONDS = new Parameter<>("RUN_DURATION_SECONDS", 25L, "The duration to run the simulation for.");
+    public static final Parameter<Long> RUNTIME_SECS = new Parameter<>("RUNTIME_SECS", 25L, "The duration to run the simulation for.");
     
     private static final MapPolicy mapPolicy = new MapPolicy(MapOrder.KEY_ORDERED, MapWriteFlags.DEFAULT);
     private IAerospikeClient client;
@@ -71,7 +71,7 @@ public class TopTransactionsAcrossDcs implements UseCase {
     
     @Override
     public Parameter<?>[] getParams() {
-        return new Parameter<?>[] {NUM_ACCOUNTS, SIMULATION_DAYS, MAX_TRANSACTIONS, RUN_DURATION_SECONDS};
+        return new Parameter<?>[] {NUM_ACCOUNTS, SIMULATION_DAYS, MAX_TRANSACTIONS, RUNTIME_SECS};
     }
 
     @Override
@@ -114,7 +114,7 @@ public class TopTransactionsAcrossDcs implements UseCase {
     
     @Override
     public void run(IAerospikeClient client, AeroMapper mapper) throws Exception {
-        Async.runFor(Duration.ofSeconds(RUN_DURATION_SECONDS.get()), async -> {
+        Async.runFor(Duration.ofSeconds(RUNTIME_SECS.get()), async -> {
             ValueCreator<Transaction> transactionCreator = ValueCreatorCache.getInstance().get(Transaction.class);
             
             // Set the map parameters to allow transaction generation
@@ -123,13 +123,13 @@ public class TopTransactionsAcrossDcs implements UseCase {
             
             AtomicLong totalTxns = new AtomicLong();
 
-            System.out.printf("Starting simulating time for %d seconds\n", RUN_DURATION_SECONDS.get());
+            System.out.printf("Starting simulating time for %d seconds\n", RUNTIME_SECS.get());
             
             // We want the transactions to be roughly ordered to simulate real traffic patterns. Given the
             // execution should be short, we simulate the number of days of transactions we want over our run duration
             async.useVirtualTime() 
                 .elapse(Duration.ofDays(SIMULATION_DAYS.get()))
-                .in(Duration.ofSeconds(RUN_DURATION_SECONDS.get()))
+                .in(Duration.ofSeconds(RUNTIME_SECS.get()))
                 .withPriorOffsetOf(Duration.ofDays(SIMULATION_DAYS.get()))
                 .startingNow();
             

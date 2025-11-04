@@ -24,7 +24,7 @@ public class BatchExecutor {
      * @return true if execution was successful, false otherwise
      */
     public static boolean executeUseCaseByName(String useCaseName, CommandLine cl, 
-            IAerospikeClient client, AeroMapper mapper) {
+            IAerospikeClient client, AeroMapper mapper, boolean seedOnly, boolean runOnly) {
         
         // Try exact name match first
         Optional<UseCase> useCaseOpt = UseCaseRegistry.findByName(useCaseName);
@@ -52,7 +52,7 @@ public class BatchExecutor {
         
         // Execute the use case
         UseCaseExecutor executor = new UseCaseExecutor(client, mapper);
-        return executor.executeUseCase(useCase, false); // false = non-interactive
+        return executor.executeUseCase(useCase, false, seedOnly, runOnly); // false = non-interactive
     }
     
     /**
@@ -63,6 +63,8 @@ public class BatchExecutor {
         options.addOption("uc", "useCaseName", true, "The name of the use case to run. Partial names are allowed");
         options.addOption("l", "listUseCases", false, "Show a list of all the use cases and their required parameters");
         options.addOption("p", "parameters", false, "Show parameters for a specific use case (use with -uc)");
+        options.addOption("ro", "runOnly", false, "Only execute the use case, do not seed data for it. (Exclusive with 'seedOnly')");
+        options.addOption("so", "seedOnly", false, "Only seed (generate) the data, do not execute the use case. (Exclusive with 'runOnly')");
         
         // Add dynamic parameter options for all use cases
         for (UseCase useCase : UseCaseRegistry.getAllUseCases()) {

@@ -12,7 +12,7 @@
 	<properties>
 		<aerospike-client.verion>9.0.5</aerospike-client.verion>
 		<aerospike-object-mapper.version>2.5.2</aerospike-object-mapper.version>
-		<aerospike-object-generator.version>0.9</aerospike-object-generator.version>
+		<aerospike-object-generator.version>0.9.0</aerospike-object-generator.version>
 		<jackson-dataformat-yaml.version>2.14.2</jackson-dataformat-yaml.version>
 		<project-lombok.version>1.18.38</project-lombok.version>
 		<junit-jupiter.version>5.9.2</junit-jupiter.version>

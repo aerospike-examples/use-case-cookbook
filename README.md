@@ -36,7 +36,7 @@ Since we will be talking about use case modeling here, we will use business obje
     git clone https://github.com/aerospike-examples/java-object-generator
     cd java-object-generator
     mvn clean package
-    mvn install:install-file -Dfile=target/java-object-generator-0.9-full.jar -DgroupId=com.aerospike -DartifactId=java-object-generator -Dverions=0.9 -Dpackaging=jar
+    mvn install:install-file -Dfile=target/java-object-generator-0.9.0.jar -DgroupId=com.aerospike -DartifactId=java-object-generator -Dverion=0.9.0 -Dpackaging=jar
     ```
 
 Let's take a look at why these three libraries will work really well together. Suppose we want to generate 10,000 different accounts with meaningful data and store them in Aerospike.

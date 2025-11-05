@@ -1,6 +1,7 @@
 /Users/tfaulkes/Programming/Aerospike/git/use-case-cookbook/source/src/main/java/com/aerospike/examples/AerospikeConnector.java
 /Users/tfaulkes/Programming/Aerospike/git/use-case-cookbook/source/src/main/java/com/aerospike/examples/AnsiColors.java
 /Users/tfaulkes/Programming/Aerospike/git/use-case-cookbook/source/src/main/java/com/aerospike/examples/Async.java
+/Users/tfaulkes/Programming/Aerospike/git/use-case-cookbook/source/src/main/java/com/aerospike/examples/inventory/model/Product.java
 /Users/tfaulkes/Programming/Aerospike/git/use-case-cookbook/source/src/main/java/com/aerospike/examples/transactionprocessing/TopTransactionsAcrossDcs.java
 /Users/tfaulkes/Programming/Aerospike/git/use-case-cookbook/source/src/main/java/com/aerospike/examples/manytomany/model/Account.java
 /Users/tfaulkes/Programming/Aerospike/git/use-case-cookbook/source/src/main/java/com/aerospike/examples/timeseries/model/Account.java
@@ -12,6 +13,7 @@
 /Users/tfaulkes/Programming/Aerospike/git/use-case-cookbook/source/src/main/java/com/aerospike/examples/gaming/Leaderboard.java
 /Users/tfaulkes/Programming/Aerospike/git/use-case-cookbook/source/src/main/java/com/aerospike/examples/timeseries/TimeSeriesLargeVarianceDemo.java
 /Users/tfaulkes/Programming/Aerospike/git/use-case-cookbook/source/src/main/java/com/aerospike/examples/onetomany/model/Listing.java
+/Users/tfaulkes/Programming/Aerospike/git/use-case-cookbook/source/src/main/java/com/aerospike/examples/inventory/InventoryManagementDemo.java
 /Users/tfaulkes/Programming/Aerospike/git/use-case-cookbook/source/src/main/java/com/aerospike/examples/UseCase.java
 /Users/tfaulkes/Programming/Aerospike/git/use-case-cookbook/source/src/main/java/com/aerospike/examples/UseCaseExecutor.java
 /Users/tfaulkes/Programming/Aerospike/git/use-case-cookbook/source/src/main/java/com/aerospike/examples/UseCaseRegistry.java
@@ -21,6 +23,7 @@
 /Users/tfaulkes/Programming/Aerospike/git/use-case-cookbook/source/src/main/java/com/aerospike/examples/realtimebidding/RealTimeBiddingDemo.java
 /Users/tfaulkes/Programming/Aerospike/git/use-case-cookbook/source/src/main/java/com/aerospike/examples/StringWithOffset.java
 /Users/tfaulkes/Programming/Aerospike/git/use-case-cookbook/source/src/main/java/com/aerospike/examples/timeseries/TimeSeriesDemo.java
+/Users/tfaulkes/Programming/Aerospike/git/use-case-cookbook/source/src/main/java/com/aerospike/examples/inventory/model/InventoryTransaction.java
 /Users/tfaulkes/Programming/Aerospike/git/use-case-cookbook/source/src/main/java/com/aerospike/examples/manytomany/ManyToManyRelationships.java
 /Users/tfaulkes/Programming/Aerospike/git/use-case-cookbook/source/src/main/java/com/aerospike/examples/ParameterParser.java
 /Users/tfaulkes/Programming/Aerospike/git/use-case-cookbook/source/src/main/java/com/aerospike/examples/manytomany/model/Customer.java

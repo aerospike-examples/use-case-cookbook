@@ -4,6 +4,7 @@ com/aerospike/examples/UseCase.class
 com/aerospike/examples/manytomany/model/Customer.class
 com/aerospike/examples/timeseries/TimeSeriesDemo$TimeConfig.class
 com/aerospike/examples/timeseries/TimeSeriesLargeVarianceDemo$QueryRange.class
+com/aerospike/examples/inventory/model/InventoryTransaction$TransactionType.class
 com/aerospike/examples/transactionprocessing/datamodel/Account.class
 com/aerospike/examples/StringWithOffset.class
 com/aerospike/examples/gaming/Leaderboard.class
@@ -41,12 +42,15 @@ com/aerospike/examples/timeseries/model/Account.class
 com/aerospike/examples/onetomany/model/Agent.class
 com/aerospike/examples/gaming/PlayerMatching.class
 com/aerospike/examples/Async$MainThread.class
+com/aerospike/examples/inventory/model/InventoryTransaction.class
 com/aerospike/examples/timeseries/TimeSeriesLargeVarianceDemo.class
+com/aerospike/examples/inventory/InventoryManagementDemo.class
 com/aerospike/examples/onetomany/model/Listing.class
 com/aerospike/examples/UseCaseCookbookRunner.class
 com/aerospike/examples/Utils$TransactionalVoid.class
 com/aerospike/examples/timeseries/TimeSeriesDemo$DatabaseConfig.class
 com/aerospike/examples/setup/SetupDemo.class
+com/aerospike/examples/inventory/model/Product.class
 com/aerospike/examples/gaming/model/Player.class
 com/aerospike/examples/timeseries/TimeSeriesDemo.class
 com/aerospike/examples/realtimebidding/RealTimeBiddingDemo.class

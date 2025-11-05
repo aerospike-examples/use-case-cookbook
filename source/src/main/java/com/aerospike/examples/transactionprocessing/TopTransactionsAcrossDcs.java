@@ -73,13 +73,17 @@ public class TopTransactionsAcrossDcs implements UseCase {
     public Parameter<?>[] getParams() {
         return new Parameter<?>[] {NUM_ACCOUNTS, SIMULATION_DAYS, MAX_TRANSACTIONS, RUNTIME_SECS};
     }
-
-    @Override
-    public void setup(IAerospikeClient client, AeroMapper mapper) throws Exception {
+    
+    private void initializeNamespacesAndSets(IAerospikeClient client, AeroMapper mapper) {
         this.client = client;
         namespace = mapper.getNamespace(Account.class);
         accountSetName = mapper.getSet(Account.class);
         transactionSetName = mapper.getSet(Transaction.class);
+    }
+
+    @Override
+    public void setup(IAerospikeClient client, AeroMapper mapper) throws Exception {
+        initializeNamespacesAndSets(client, mapper);
         this.client.truncate(null, namespace, accountSetName, null);
         this.client.truncate(null, namespace, transactionSetName, null);
         new Generator()
@@ -114,6 +118,7 @@ public class TopTransactionsAcrossDcs implements UseCase {
     
     @Override
     public void run(IAerospikeClient client, AeroMapper mapper) throws Exception {
+        initializeNamespacesAndSets(client, mapper);
         Async.runFor(Duration.ofSeconds(RUNTIME_SECS.get()), async -> {
             ValueCreator<Transaction> transactionCreator = ValueCreatorCache.getInstance().get(Transaction.class);
             

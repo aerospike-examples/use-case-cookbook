@@ -194,6 +194,7 @@ public class TimeSeriesLargeVarianceDemo implements UseCase, AutoCloseable {
 
     @Override
     public void run(IAerospikeClient client, AeroMapper mapper) throws Exception {
+        setClient(client, mapper);
         demonstrateQueries();
     }
 

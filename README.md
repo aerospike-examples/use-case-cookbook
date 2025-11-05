@@ -145,3 +145,19 @@ In many cases, time series data is not regular, but rather has a bell-curve (nor
 
 ## Recent events across DCs
 It is not uncommon to need to merge events on the same account across different DCs. For example, a credit card company wants the 50 most recent transactions for a credit card, but transactions can be generated in either of two DCs. Eventual consistency is a must -- latency and throughput requirements do not allow a stretch cluster between the different DCs. See [Transactions across DCs](UseCases/top-transactions-across-dcs.md)
+
+# Contributing
+
+## Adding a New Use Case
+Want to contribute your own use case to this cookbook? We'd love to have your contribution! See our comprehensive guide on [How to Add a New Use Case](CONTRIBUTING.md) which includes:
+
+- Step-by-step instructions for creating a use case
+- Complete, working example with ~15 fields and @GenMagic
+- How to use the Async library (`runFor`, `periodic`, `continuous`)
+- Using Parameters instead of hard-coded constants
+- Data model best practices
+- Documentation guidelines
+- AQL query examples
+- End-to-end testing procedures
+
+The guide walks you through a fully worked example of an Inventory Management System that demonstrates all the patterns and best practices used in this repository.

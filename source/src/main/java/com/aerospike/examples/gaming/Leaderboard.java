@@ -107,6 +107,7 @@ public class Leaderboard implements UseCase {
 
     @Override
     public void run(IAerospikeClient client, AeroMapper mapper) throws Exception {
+        setDefaultValues(mapper);
         Record res = client.get(null, new Key(playerNamespace, playerSet, 1));
         int score = res.getInt("score");
         final int playerId = res.getInt("id");

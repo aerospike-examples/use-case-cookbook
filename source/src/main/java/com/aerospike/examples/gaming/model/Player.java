@@ -8,8 +8,7 @@ import com.aerospike.mapper.annotations.AerospikeKey;
 import com.aerospike.mapper.annotations.AerospikeRecord;
 
 import lombok.Data;
-
-@AerospikeRecord(namespace = "test", set = "uccb_player", sendKey = true)
+@AerospikeRecord(namespace = "${demo.namespace:test}", set = "uccb_player")
 @GenMagic
 @Data
 public class Player {

@@ -46,7 +46,7 @@ public class TlsOptions {
         policy.ciphers = this.ciphers != null ? this.ciphers.split(",") : null;
         policy.revokeCertificates = this.revokeCertificates != null ? Util.toBigIntegerArray(this.revokeCertificates) : null;
         policy.forLoginOnly = this.loginOnly;
-        policy.context = this.ssl != null ? this.ssl.toSSLFactory().getSslContext() : null;
+        policy.context = this.ssl != null ? this.ssl.toSSLFactory(false).getSslContext() : null;
         return policy;
     }
 }

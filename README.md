@@ -146,6 +146,9 @@ In many cases, time series data is not regular, but rather has a bell-curve (nor
 ## Recent events across DCs
 It is not uncommon to need to merge events on the same account across different DCs. For example, a credit card company wants the 50 most recent transactions for a credit card, but transactions can be generated in either of two DCs. Eventual consistency is a must -- latency and throughput requirements do not allow a stretch cluster between the different DCs. See [Transactions across DCs](UseCases/top-transactions-across-dcs.md)
 
+## Advanced Expressions
+A collection of techniques showing advanced use of expressions. Some of these techniques are not intuitiely obvious, so this section is more of an education in what is possible, rather than targeting a specific use case. See [Advanced Expressions](UseCases/advanced-expressions.md)
+
 # Contributing
 
 ## Adding a New Use Case

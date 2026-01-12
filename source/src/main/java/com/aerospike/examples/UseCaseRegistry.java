@@ -8,6 +8,7 @@ import com.aerospike.examples.gaming.Leaderboard;
 import com.aerospike.examples.gaming.PlayerMatching;
 import com.aerospike.examples.manytomany.ManyToManyRelationships;
 import com.aerospike.examples.onetomany.OneToManyRelationships;
+import com.aerospike.examples.recordversioning.VersioningRecords;
 import com.aerospike.examples.setup.SetupDemo;
 import com.aerospike.examples.timeseries.TimeSeriesDemo;
 import com.aerospike.examples.timeseries.TimeSeriesLargeVarianceDemo;
@@ -28,6 +29,7 @@ public class UseCaseRegistry {
             new TimeSeriesDemo(),
             new TimeSeriesLargeVarianceDemo(),
             new TopTransactionsAcrossDcs(),
+            new VersioningRecords(),
             new AdvancedExpressions()
     );
     

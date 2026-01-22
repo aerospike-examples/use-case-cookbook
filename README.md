@@ -149,6 +149,9 @@ It is not uncommon to need to merge events on the same account across different 
 ## Advanced Expressions
 A collection of techniques showing advanced use of expressions. Some of these techniques are not intuitiely obvious, so this section is more of an education in what is possible, rather than targeting a specific use case. See [Advanced Expressions](UseCases/advanced-expressions.md)
 
+## Versioning Records
+Maintain historical versions of records with point-in-time query capabilities. Demonstrates atomic version creation using transactions and time-based queries using map operations. Objects are assumed to have 2 parts -- a base record which changes frequently and is small, and a details record which is large and changes infrequently.  See [Versioning Records](UseCases/versioning-records.md)
+
 # Contributing
 
 ## Adding a New Use Case

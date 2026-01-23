@@ -4,6 +4,7 @@ import java.util.List;
 import java.util.Optional;
 
 import com.aerospike.examples.advancedexpressions.AdvancedExpressions;
+import com.aerospike.examples.arbitraryprecision.VersionedDataCube;
 import com.aerospike.examples.gaming.Leaderboard;
 import com.aerospike.examples.gaming.PlayerMatching;
 import com.aerospike.examples.manytomany.ManyToManyRelationships;
@@ -30,6 +31,7 @@ public class UseCaseRegistry {
             new TimeSeriesLargeVarianceDemo(),
             new TopTransactionsAcrossDcs(),
             new VersioningRecords(),
+            new VersionedDataCube(),
             new AdvancedExpressions()
     );
     

@@ -1,5 +1,6 @@
 package com.aerospike.examples.arbitraryprecision;
 
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.HashMap;
@@ -7,7 +8,11 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
+import java.util.Random;
 import java.util.Set;
+import java.util.concurrent.ThreadLocalRandom;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
 import com.aerospike.client.AerospikeClient;
 import com.aerospike.client.AerospikeException;
@@ -234,11 +239,13 @@ public class DataCubeManipulator <T> {
         
         Utils.doInTransaction(client, txn -> {
             // Step 1: Group affected rows by their Aerospike record keys
+            long baseTime = System.nanoTime();
             Map<Key, Set<Integer>> rowRecordsToRows = new HashMap<>();
             for (int rowId : updates.getAffectedRows()) {
                 Key rowKey = getRowKey(rowId);
                 rowRecordsToRows.computeIfAbsent(rowKey, k -> new HashSet<>()).add(rowId);
             }
+//System.out.printf(" 1: %,dus", (System.nanoTime() - baseTime)/1000);
             
             // Step 2: Read current versions for cube and all affected row records
             BatchPolicy batchReadPolicy = client.getBatchPolicyDefault();
@@ -253,6 +260,7 @@ public class DataCubeManipulator <T> {
                 cubeReadOps[1+i] = Operation.get(DataCube.NON_VERSIONS_BINS[i]);
             }
             readBatch.add(new BatchRead(key, cubeReadOps));
+//System.out.printf(" 2: %,dus", (System.nanoTime() - baseTime)/1000);
             
             // Read version and versions map for each affected row record
             for (Key rowKey : rowRecordsToRows.keySet()) {
@@ -265,10 +273,12 @@ public class DataCubeManipulator <T> {
                 }
                 readBatch.add(new BatchRead(rowKey, rowOperations));
             }
-            
+//System.out.printf(" 3: %,dus", (System.nanoTime() - baseTime)/1000);
+
             // Execute batch read
             client.operate(batchReadPolicy, readBatch);
-            
+//System.out.printf(" 4: %,dus", (System.nanoTime() - baseTime)/1000);
+
             // Step 3: Extract current versions and prepare batch writes
             Record cubeRecord = readBatch.get(0).record;
             if (cubeRecord == null) {
@@ -283,13 +293,15 @@ public class DataCubeManipulator <T> {
             List<BatchRecord> writeBatch = new ArrayList<>();
             BatchWritePolicy bwp = client.copyBatchWritePolicyDefault();
             bwp.sendKey = true;
-            
+//System.out.printf(" 5: %,dus", (System.nanoTime() - baseTime)/1000);
+
             // 4a: Copy current cube record to versioned key (excluding versions map)
             Operation[] cubeCopyOps = cubeRecord.bins.entrySet().stream()
                 .filter(e -> !"versions".equals(e.getKey()))
                 .map(e -> Operation.put(new Bin(e.getKey(), Value.get(e.getValue()))))
                 .toArray(Operation[]::new);
-            
+//System.out.printf(" 6: %,dus", (System.nanoTime() - baseTime)/1000);
+
             BatchWritePolicy rowCopyPolicy = client.copyBatchWritePolicyDefault();
             rowCopyPolicy.recordExistsAction = RecordExistsAction.CREATE_ONLY;
             rowCopyPolicy.sendKey = true;
@@ -301,7 +313,8 @@ public class DataCubeManipulator <T> {
                 MapOperation.put(MAP_POLICY, "versions", Value.get(cubeVersionMapKeyOfCurrent), Value.get(currentCubeVersion)),
                 MapOperation.put(MAP_POLICY, "versions", Value.get(now), Value.get(-1))
             )));
-            
+//System.out.printf(" 7: %,dus", (System.nanoTime() - baseTime)/1000);
+
             // Step 5: Process each affected row record
             int readIndex = 1; // Start after cube record
             for (Map.Entry<Key, Set<Integer>> entry : rowRecordsToRows.entrySet()) {
@@ -357,19 +370,21 @@ public class DataCubeManipulator <T> {
                 // Add batch write for this row record's updates
                 writeBatch.add(new BatchWrite(bwp, rowKey, rowUpdateOps.toArray(new Operation[0])));
             }
-            
+//System.out.printf(" 8: %,dus", (System.nanoTime() - baseTime)/1000);
+
             // Step 6: Execute all batch writes
             BatchPolicy batchWritePolicy = client.getBatchPolicyDefault();
             batchWritePolicy.txn = txn;
             batchWritePolicy.maxConcurrentThreads = 0; // Parallel execution
             
             client.operate(batchWritePolicy, writeBatch);
-            
+//System.out.printf(" 9: %,dus (%,d entries)\n", (System.nanoTime() - baseTime)/1000, writeBatch.size());
+
             // TODO: Process results and handle errors if needed
         });
     }
     
-    public DataCube getCube(long time) {
+    public DataCube<T> getCube(long time) {
         long timeToUse;
         if (time <= 0) {
             timeToUse = new Date().getTime();
@@ -393,20 +408,23 @@ public class DataCubeManipulator <T> {
             Record cubeRecord = client.operate(writePolicy, key, cubeReadOps);
             
             DataCube<T> dataCube = new DataCube<>();
-            dataCube.setColumns(cubeRecord.getInt("columns"));
-            dataCube.setRows(cubeRecord.getInt("rows"));
-            dataCube.setVersion(cubeRecord.getInt("version"));
             
             List<Long> versionAtDesiredTime = (List<Long>) cubeRecord.getList("versions");
             if (versionAtDesiredTime.size() == 0) {
                 // This is before the cube existed
                 return null;
             }
-            long versionToSearch = versionAtDesiredTime.get(0) == -1 ? Integer.MAX_VALUE : versionAtDesiredTime.get(0) + 1;
+            long versionNeeded = versionAtDesiredTime.get(0);
+            long versionToSearch = versionNeeded == -1 ? Integer.MAX_VALUE : versionNeeded + 1;
             
             // Now we know the cube version, loop through each cube row, getting either the data (if this is
             // the current version) or the version to use
             List<BatchRecord> batchReads = new ArrayList<>();
+            if (versionNeeded != -1) {
+                // Need to load the cube at the right time too, in case there are cube level properties whose version is important
+                batchReads.add(new BatchRead(getVersionedCubeKey((int)versionNeeded), true));
+            }
+
             for (int thisRow = 0; thisRow < rows; thisRow+= rowsPerRecord) {
                 int operationsThisRow = Math.min(rowsPerRecord, rows - thisRow);
                 Operation[] opsForCurrentRow = new Operation[operationsThisRow];
@@ -432,7 +450,15 @@ public class DataCubeManipulator <T> {
             batchPolicy.sendKey = true;
             batchPolicy.txn = txn;
             client.operate(batchPolicy, batchReads);
-            
+
+            if (versionNeeded != -1) {
+                cubeRecord = batchReads.get(0).record;
+                batchReads.remove(0);
+            }
+            dataCube.setColumns(cubeRecord.getInt("columns"));
+            dataCube.setRows(cubeRecord.getInt("rows"));
+            dataCube.setVersion(cubeRecord.getInt("version"));
+
             dataCube.setCubeData(new ArrayList<List<T>>());
             
             // If the rows returned the actual data, map it. We know if the data came back because
@@ -527,16 +553,84 @@ public class DataCubeManipulator <T> {
             CubeUpdates<Double> updates2 = new CubeUpdates<>();
             updates2.updateCell(2, 3, 84.0);  // Update same cell again
             updates2.updateCell(0, 0, 1.0);   // Update cell in first row
+            List<Double> sequence = IntStream.rangeClosed(1, 20)
+                    .mapToDouble(i -> i * 0.1)
+                    .boxed() // Box the primitive doubles to Double objects for the List
+                    .collect(Collectors.toList());
+            updates2.updateRow(8, sequence);
             
             System.out.println("Applying second set of versioned changes...");
             dcm.applyChanges(updates2);
             System.out.println("Second set of changes applied successfully!");
+            queryTime = new Date().getTime();
+            System.out.printf("\nCube at time %d is: %s\n", queryTime, dcm.getCube(queryTime));
             
             System.out.println("\nVersioning test complete. Check the database with AQL to see:");
             System.out.println("- Cube record with key '1' (current version)");
             System.out.println("- Cube versioned records with keys '1:0', '1:1' (historical versions)");
             System.out.println("- Row records and their versioned copies");
+            
+            // Test 2 -- create a big cube.
+            final int ROWS = 5000;
+            final int COLS = 600;
+            System.out.println("-------------------------------------------");
+            System.out.printf("Testing %,d columns by %,d rows data cube\n", COLS, ROWS);
+            System.out.println("-------------------------------------------");
+            Random rand = ThreadLocalRandom.current();
+            List<List<Double>> cube2 = new ArrayList<>(ROWS);
+            for (int row = 0; row < ROWS; row++) {
+                List<Double> rowValues = new ArrayList<Double>(COLS);
+                cube2.add(rowValues);
+                for (int col = 0; col < COLS; col++) {
+                    rowValues.add(rand.nextDouble());
+                }
+            }
+            Key key2= new Key("test", "cube", 2);
+            long now = System.nanoTime();
+            DataCubeManipulator<Double> dcm2 = new DataCubeManipulator<>(client, key2, new DoubleCellConverter(), cube2);
+            System.out.printf("Initial insert took %,dus\n", (System.nanoTime() - now) / 1000);
+            
+            now = System.nanoTime();
+            dcm2.getCube(new Date().getTime());
+            System.out.printf("Initial read took %,dus\n", (System.nanoTime() - now) / 1000);
+            // Do multiple times to eliminate JVM warmup
+            for (int i = 0; i < 4; i++) {
+                System.out.println("-------------------------------------------");
+                System.out.printf("Testing %,d columns by %,d rows data cube\n", COLS, ROWS);
+                System.out.println("-------------------------------------------");
+                timeApplyChangesAndRead(ROWS, COLS, 1, dcm2);
+                timeApplyChangesAndRead(ROWS, COLS, 5, dcm2);
+                timeApplyChangesAndRead(ROWS, COLS, 10, dcm2);
+                timeApplyChangesAndRead(ROWS, COLS, 50, dcm2);
+                timeApplyChangesAndRead(ROWS, COLS, 100, dcm2);
+                timeApplyChangesAndRead(ROWS, COLS, 500, dcm2);
+                timeApplyChangesAndRead(ROWS, COLS, 1000, dcm2);
+                timeApplyChangesAndRead(ROWS, COLS, 5000, dcm2);
+                timeApplyChangesAndRead(ROWS, COLS, 10000, dcm2);
+                timeApplyChangesAndRead(ROWS, COLS, 50000, dcm2);
+                timeApplyChangesAndRead(ROWS, COLS, 100000, dcm2);
+                timeApplyChangesAndRead(ROWS, COLS, 500000, dcm2);
+            }
         }
+    }
+    
+    private static void timeApplyChangesAndRead(int ROWS, int COLS, int numChanges, DataCubeManipulator<Double> dcm) {
+        Random rand = ThreadLocalRandom.current();
+        CubeUpdates<Double> updates = new CubeUpdates<>();
+        for (int i = 0; i < numChanges; i++) {
+            updates.updateCell(rand.nextInt(ROWS), rand.nextInt(COLS), rand.nextDouble());
+        }
+        
+        long now = System.nanoTime();
+        dcm.applyChanges(updates);
+        long afterChanges = System.nanoTime();
+        dcm.getCube(new Date().getTime());
+        long afterRead = System.nanoTime();
+        System.out.printf("%,8d changes took %,9dus, reading back took %,dus\n", 
+                numChanges,
+                (afterChanges - now) / 1000,
+                (afterRead - afterChanges) / 1000);
+
     }
 
 }

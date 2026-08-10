@@ -273,6 +273,8 @@ public class AerospikeConnector {
         clientPolicy.authMode = this.getAuthMode();
         clientPolicy.clusterName = this.getClusterName();
         clientPolicy.useServicesAlternate = this.isServicesAlternate();
+        clientPolicy.maxConnsPerNode = 500;
+        clientPolicy.minConnsPerNode = 100;
         Host[] hosts = Host.parseHosts(this.hosts, 3000);
         IAerospikeClient client = new AerospikeClient(clientPolicy, hosts);
 

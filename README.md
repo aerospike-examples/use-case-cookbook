@@ -155,6 +155,15 @@ Maintain historical versions of records with point-in-time query capabilities. D
 ## Delta Versioning Records
 Maintain an audit trail of record changes using delta records instead of full copies. Detects bin-level changes server-side with expressions, stores who changed what and when, and optionally stores new bin values for record reconstruction. See [Delta Versioning Records](UseCases/versioning-records-delta.md)
 
+## Hot Key — Read (Replica Spread)
+Spread read load across identical replica records. Runs baseline (single key) and mitigation (random replica) phases with per-second KEY_BUSY and latency metrics. See [Hot Key — Read (Replica Spread)](UseCases/hot-key-read-replica-spread.md)
+
+## Hot Key — Write (Shard + Merge)
+Shard write load across multiple keys and merge totals with batch reads. See [Hot Key — Write (Shard + Merge)](UseCases/hot-key-write-shard-merge.md)
+
+## Hot Key — Write (HotKeyReducer)
+Batch concurrent operates in-process before sending to Aerospike. See [Hot Key — Write (HotKeyReducer)](UseCases/hot-key-write-reducer.md)
+
 # Contributing
 
 ## Adding a New Use Case

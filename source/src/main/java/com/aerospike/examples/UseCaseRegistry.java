@@ -8,6 +8,9 @@ import com.aerospike.examples.gaming.Leaderboard;
 import com.aerospike.examples.gaming.PlayerMatching;
 import com.aerospike.examples.manytomany.ManyToManyRelationships;
 import com.aerospike.examples.onetomany.OneToManyRelationships;
+import com.aerospike.examples.hotkeys.ReducerHotKeyUseCase;
+import com.aerospike.examples.hotkeys.ReadHotKeyUseCase;
+import com.aerospike.examples.hotkeys.WriteHotKeyUseCase;
 import com.aerospike.examples.recordversioning.DeltaVersioningRecords;
 import com.aerospike.examples.recordversioning.VersioningRecords;
 import com.aerospike.examples.setup.SetupDemo;
@@ -32,6 +35,9 @@ public class UseCaseRegistry {
             new TopTransactionsAcrossDcs(),
             new VersioningRecords(),
             new DeltaVersioningRecords(),
+            new ReadHotKeyUseCase(),
+            new WriteHotKeyUseCase(),
+            new ReducerHotKeyUseCase(),
             new AdvancedExpressions()
     );
     

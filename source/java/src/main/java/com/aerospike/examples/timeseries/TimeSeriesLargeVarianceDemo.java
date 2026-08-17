@@ -7,15 +7,18 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
+import java.util.Set;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
-import java.util.stream.Collectors;
 
 import com.aerospike.client.AerospikeClient;
+import com.aerospike.client.AerospikeException;
+import com.aerospike.client.ResultCode;
 import com.aerospike.client.Bin;
 import com.aerospike.client.IAerospikeClient;
 import com.aerospike.client.Key;
@@ -40,6 +43,7 @@ import com.aerospike.client.policy.BatchPolicy;
 import com.aerospike.client.policy.ClientPolicy;
 import com.aerospike.client.policy.Policy;
 import com.aerospike.client.policy.WritePolicy;
+import com.aerospike.examples.AnsiColors;
 import com.aerospike.examples.UseCase;
 import com.aerospike.examples.Utils;
 import com.aerospike.examples.timeseries.model.Account;
@@ -427,18 +431,39 @@ public class TimeSeriesLargeVarianceDemo implements UseCase, AutoCloseable {
         
         writePolicy.failOnFilteredOut = false;
         writePolicy.filterExp = Exp.build(canWriteToRootBlock);
-        
-        Record record = client.operate(writePolicy, key, 
-                MapOperation.put(mapPolicy, DatabaseConfig.BIN_NAME, 
-                    Value.get(event.getId()), 
-                    Value.get(List.of(event.getDeviceId(), convertEventToMap(event)))
-                )
-            );
-        
+
+        Operation putOp = MapOperation.put(mapPolicy, DatabaseConfig.BIN_NAME,
+                Value.get(event.getId()),
+                Value.get(List.of(event.getDeviceId(), convertEventToMap(event))));
+
+        Record record;
+        try {
+            record = client.operate(writePolicy, key, putOp);
+        }
+        catch (AerospikeException ae) {
+            // Some namespaces (eviction/nsup disabled, e.g. this dev cluster's "test" namespace)
+            // reject an explicit record TTL with FAIL_FORBIDDEN. Fall back to writing without one.
+            if (setExpiry && ae.getResultCode() == ResultCode.FAIL_FORBIDDEN) {
+                if (!expirationWarningShown) {
+                    expirationWarningShown = true;
+                    System.out.println(AnsiColors.YELLOW
+                            + "Note: this namespace does not support record expiration (eviction is disabled) - "
+                            + "events will be written without a TTL." + AnsiColors.RESET);
+                }
+                writePolicy.expiration = -2;
+                record = client.operate(writePolicy, key, putOp);
+            }
+            else {
+                throw ae;
+            }
+        }
+
         if (record == null) {
             splitRootBlock(event, key);
         }
     }
+
+    private boolean expirationWarningShown = false;
     
     private void splitEventsIntoLists(Record record, List<Entry<String, List<?>>> majorityEvents, List<Entry<String, List<?>>> minorityEvents) {
         List<Entry<String, List<?>>> list = (List<Entry<String, List<?>>>) record.getList(DatabaseConfig.BIN_NAME);
@@ -704,12 +729,13 @@ public class TimeSeriesLargeVarianceDemo implements UseCase, AutoCloseable {
         
         Operation operation = createFilterOperation(queryRange.earliestEventId, queryRange.latestEventId, count, deviceIds);
         Operation getContinuationBlock = Operation.get(DatabaseConfig.CONTINUATION_BIN);
+        Set<String> deviceFilter = deviceIds.length == 0 ? null : new HashSet<>(Arrays.asList(deviceIds));
 
         // Note: for 100% consistent results, could do this in a transaction. But without
         // transactions you won't get read conflicts on quickly updating records, and will
         // not miss any updates
-        processRecordsInRange(accountId, queryRange, operation, getContinuationBlock, count, results, direction);
-        
+        processRecordsInRange(accountId, queryRange, operation, getContinuationBlock, count, results, direction, deviceFilter);
+
         return results;
     }
     
@@ -764,91 +790,91 @@ public class TimeSeriesLargeVarianceDemo implements UseCase, AutoCloseable {
     /**
      * Processes records in the specified range, handling both ascending and descending order
      */
-    private void processRecordsInRange(String accountId, QueryRange queryRange, Operation operation, 
-            Operation getContinuationBlock, int count, List<Event> results, SortDirection direction) {
-        
+    private void processRecordsInRange(String accountId, QueryRange queryRange, Operation operation,
+            Operation getContinuationBlock, int count, List<Event> results, SortDirection direction, Set<String> deviceFilter) {
+
         if (direction == SortDirection.ASCENDING) {
-            processRecordsAscending(accountId, queryRange, operation, getContinuationBlock, count, results);
-        } 
+            processRecordsAscending(accountId, queryRange, operation, getContinuationBlock, count, results, deviceFilter);
+        }
         else {
-            processRecordsDescending(accountId, queryRange, operation, getContinuationBlock, count, results);
+            processRecordsDescending(accountId, queryRange, operation, getContinuationBlock, count, results, deviceFilter);
         }
     }
-    
+
     /**
      * Processes records in ascending order
      */
-    private void processRecordsAscending(String accountId, QueryRange queryRange, Operation operation, 
-            Operation getContinuationBlock, int count, List<Event> results) {
-        
-        for (long recordKey = queryRange.startRecord; 
-                results.size() < count && recordKey <= queryRange.endRecord; 
+    private void processRecordsAscending(String accountId, QueryRange queryRange, Operation operation,
+            Operation getContinuationBlock, int count, List<Event> results, Set<String> deviceFilter) {
+
+        for (long recordKey = queryRange.startRecord;
+                results.size() < count && recordKey <= queryRange.endRecord;
                 recordKey++) {
-            
+
             Key key = new Key(DatabaseConfig.NAMESPACE, DatabaseConfig.EVENT_SET, accountId + ":" + recordKey);
             Record record = client.operate(null, key, operation, getContinuationBlock);
-            
+
             if (record != null) {
-                processRecordWithContinuations(record, key, operation, queryRange.latestEventId, count, results, SortDirection.ASCENDING);
+                processRecordWithContinuations(record, key, operation, queryRange.latestEventId, count, results, SortDirection.ASCENDING, deviceFilter);
             }
         }
     }
-    
+
     /**
      * Processes records in descending order
      */
-    private void processRecordsDescending(String accountId, QueryRange queryRange, Operation operation, 
-            Operation getContinuationBlock, int count, List<Event> results) {
-        
-        for (long recordKey = queryRange.endRecord; 
-                results.size() < count && recordKey >= queryRange.startRecord; 
+    private void processRecordsDescending(String accountId, QueryRange queryRange, Operation operation,
+            Operation getContinuationBlock, int count, List<Event> results, Set<String> deviceFilter) {
+
+        for (long recordKey = queryRange.endRecord;
+                results.size() < count && recordKey >= queryRange.startRecord;
                 recordKey--) {
-            
+
             Key key = new Key(DatabaseConfig.NAMESPACE, DatabaseConfig.EVENT_SET, accountId + ":" + recordKey);
             Record record = client.operate(null, key, operation, getContinuationBlock);
-            
+
             if (record != null) {
-                processRecordWithContinuations(record, key, operation, queryRange.earliestEventId, count, results, SortDirection.DESCENDING);
+                processRecordWithContinuations(record, key, operation, queryRange.earliestEventId, count, results, SortDirection.DESCENDING, deviceFilter);
             }
         }
     }
-    
+
     /**
      * Processes a record, handling continuation bins if they exist
      */
-    private void processRecordWithContinuations(Record record, Key key, Operation operation, 
-            String boundaryEventId, int count, List<Event> results, SortDirection direction) {
-        
+    private void processRecordWithContinuations(Record record, Key key, Operation operation,
+            String boundaryEventId, int count, List<Event> results, SortDirection direction, Set<String> deviceFilter) {
+
         List<String> continuationBin = (List<String>) record.getList(DatabaseConfig.CONTINUATION_BIN);
-        
+
         if (continuationBin != null) {
-            processContinuationBins(continuationBin, key, operation, boundaryEventId, count, results, direction);
-        } 
+            processContinuationBins(continuationBin, key, operation, boundaryEventId, count, results, direction, deviceFilter);
+        }
         else {
-            addEventsToResults(count, record, results, direction);
+            addEventsToResults(count, record, results, direction, deviceFilter);
         }
     }
-    
+
     /**
      * Processes continuation bins in the appropriate order
      */
-    private void processContinuationBins(List<String> continuationBin, Key key, Operation operation, 
-            String boundaryEventId, int count, List<Event> results, SortDirection direction) {
-        
+    private void processContinuationBins(List<String> continuationBin, Key key, Operation operation,
+            String boundaryEventId, int count, List<Event> results, SortDirection direction, Set<String> deviceFilter) {
+
         if (direction == SortDirection.ASCENDING) {
-            processContinuationBinsAscending(continuationBin, key, operation, boundaryEventId, count, results);
-        } 
+            processContinuationBinsAscending(continuationBin, key, operation, boundaryEventId, count, results, deviceFilter);
+        }
         else {
-            processContinuationBinsDescending(continuationBin, key, operation, boundaryEventId, count, results);
+            processContinuationBinsDescending(continuationBin, key, operation, boundaryEventId, count, results, deviceFilter);
         }
     }
-    
+
     /**
      * Processes continuation bins in ascending order
      */
-    private void processContinuationBinsAscending(List<String> continuationBin, Key key, Operation operation, 
-            String latestEventId, int count, List<Event> results) {
-        
+    private void processContinuationBinsAscending(List<String> continuationBin, Key key, Operation operation,
+            String latestEventId, int count, List<Event> results, Set<String> deviceFilter) {
+
         // Iterate over sub-records so long as they can possibly contain results in the correct range.
         // The items in the list are guaranteed to be in ascending order
         for (int subKeyIndex = 0; subKeyIndex < continuationBin.size(); subKeyIndex++) {
@@ -858,22 +884,22 @@ public class TimeSeriesLargeVarianceDemo implements UseCase, AutoCloseable {
             }
             Key subRecordKey = getContinuationKeyFromKey(key, subKey);
             Record subRecord = client.operate(null, subRecordKey, operation);
-            addEventsToResults(count, subRecord, results, SortDirection.ASCENDING);
+            addEventsToResults(count, subRecord, results, SortDirection.ASCENDING, deviceFilter);
         }
     }
-    
+
     /**
      * Processes continuation bins in descending order
      */
-    private void processContinuationBinsDescending(List<String> continuationBin, Key key, Operation operation, 
-            String earliestEventId, int count, List<Event> results) {
-        
+    private void processContinuationBinsDescending(List<String> continuationBin, Key key, Operation operation,
+            String earliestEventId, int count, List<Event> results, Set<String> deviceFilter) {
+
         for (int subKeyIndex = continuationBin.size() - 1; subKeyIndex >= 0; subKeyIndex--) {
             String subKey = continuationBin.get(subKeyIndex);
             Key subRecordKey = getContinuationKeyFromKey(key, subKey);
             Record subRecord = client.operate(null, subRecordKey, operation);
-            addEventsToResults(count, subRecord, results, SortDirection.DESCENDING);
-            
+            addEventsToResults(count, subRecord, results, SortDirection.DESCENDING, deviceFilter);
+
             // When descending, we must compare the subKey to the earliest event id AFTER loading
             // the record as it's possible that there are some events at the end of the record which
             // are still valid.
@@ -951,74 +977,52 @@ public class TimeSeriesLargeVarianceDemo implements UseCase, AutoCloseable {
     
     /**
      * Creates a filter operation for database queries.
+     * <p/>
+     * The device-specific variant of this used to push device filtering server-side, into the
+     * same nested-expression call as the time-range filter (a {@code MapExp.getByValueList} over
+     * the result of {@code MapExp.getByKeyRange}, matching entries against a wildcard-tailed
+     * {@code [deviceId, *]} value list). On this cluster's server build that nested composition
+     * reliably returns {@code Error 4 ... Parameter error} regardless of how the wildcard is
+     * encoded - so device filtering is applied client-side in {@link #addEventToResults} instead,
+     * and this always uses the plain (proven-working) key-range filter.
      */
     private Operation createFilterOperation(String upperBoundEventId, String lowerBoundEventId,
             int count, String... deviceIds) {
-        
-        if (deviceIds.length == 0) {
-            return createAllDevicesFilter(upperBoundEventId, lowerBoundEventId);
-        } else {
-            return createSpecificDevicesFilter(upperBoundEventId, lowerBoundEventId, deviceIds);
-        }
+        return createAllDevicesFilter(upperBoundEventId, lowerBoundEventId);
     }
-    
+
     /**
      * Creates a filter operation for all devices.
      */
     private Operation createAllDevicesFilter(String oldestEventId, String newestEventId) {
         Value oldestValue = oldestEventId == null ? Value.NULL : Value.get(oldestEventId);
-        Value newestValue = newestEventId == null ? Value.INFINITY : Value.get(newestEventId); 
-        
-        return MapOperation.getByKeyRange(DatabaseConfig.BIN_NAME, oldestValue, 
+        Value newestValue = newestEventId == null ? Value.INFINITY : Value.get(newestEventId);
+
+        return MapOperation.getByKeyRange(DatabaseConfig.BIN_NAME, oldestValue,
                                        newestValue, MapReturnType.KEY_VALUE);
     }
-    
-    /**
-     * Creates a filter operation for specific devices.
-     */
-    private Operation createSpecificDevicesFilter(String oldestEventId, String newestEventId, String... deviceIds) {
-        List<Value> valueList = Arrays.stream(deviceIds)
-            .map(deviceId -> Value.get(List.of(deviceId, Value.WILDCARD)))
-            .collect(Collectors.toList());
-        
-        return createTimeRangeAndDeviceFilter(oldestEventId, newestEventId, valueList);
-    }
-    
-    /**
-     * Creates a combined time range and device filter.
-     */
-    private Operation createTimeRangeAndDeviceFilter(String oldestEventId, String newestEventId, List<Value> valueList) {
-        Exp filterMapByKeyRange = MapExp.getByKeyRange(MapReturnType.KEY_VALUE, 
-                Exp.val(oldestEventId), Exp.val(newestEventId), Exp.mapBin(DatabaseConfig.BIN_NAME));
-        
-        Exp filterKeyRangeByDevice = MapExp.getByValueList(MapReturnType.KEY_VALUE, 
-                Exp.val(valueList), filterMapByKeyRange);
-        
-        return ExpOperation.read(DatabaseConfig.BIN_NAME, 
-            Exp.build(filterKeyRangeByDevice), ExpReadFlags.DEFAULT);
-    }
-    
+
     /**
      * Adds events from a database record to the results list.
      */
-    private void addEventsToResults(int count, Record record, List<Event> results, SortDirection direction) {
+    private void addEventsToResults(int count, Record record, List<Event> results, SortDirection direction, Set<String> deviceFilter) {
         if (record == null) {
             return;
         }
-        
+
         @SuppressWarnings("unchecked")
         List<Entry<String, List<?>>> entryList = (List<Entry<String, List<?>>>) record.getList(DatabaseConfig.BIN_NAME);
-        
+
         if (direction == SortDirection.DESCENDING) {
             for (int i = entryList.size() - 1; i >= 0; i--) {
                 Entry<String, List<?>> entry = entryList.get(i);
-                if (!addEventToResults(count, entry.getValue(), results)) {
+                if (!addEventToResults(count, entry.getValue(), results, deviceFilter)) {
                     break;
                 }
             }
         } else {
             for (Entry<String, List<?>> entry : entryList) {
-                if (!addEventToResults(count, entry.getValue(), results)) {
+                if (!addEventToResults(count, entry.getValue(), results, deviceFilter)) {
                     break;
                 }
             }
@@ -1028,11 +1032,16 @@ public class TimeSeriesLargeVarianceDemo implements UseCase, AutoCloseable {
     /**
      * Adds a single event to the results list if within the count limit.
      */
-    private boolean addEventToResults(int count, List<?> value, List<Event> results) {
+    private boolean addEventToResults(int count, List<?> value, List<Event> results, Set<String> deviceFilter) {
         if (results.size() >= count) {
             return false;
         }
-        
+
+        String deviceId = (String) value.get(0);
+        if (deviceFilter != null && !deviceFilter.contains(deviceId)) {
+            return true;
+        }
+
         @SuppressWarnings("unchecked")
         Map<String, Object> eventMap = (Map<String, Object>) value.get(1);
         results.add(convertMapToEvent(eventMap));

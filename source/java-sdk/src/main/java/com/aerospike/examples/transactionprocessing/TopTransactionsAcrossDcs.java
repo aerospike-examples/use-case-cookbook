@@ -11,18 +11,18 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
 
-import com.aerospike.client.sdk.DataSet;
-import com.aerospike.client.sdk.Key;
 import com.aerospike.client.sdk.Record;
 import com.aerospike.client.sdk.RecordResult;
-import com.aerospike.client.sdk.RecordStream;
 import com.aerospike.client.sdk.Session;
+import com.aerospike.client.sdk.TypedDataSet;
+import com.aerospike.client.sdk.TypedKey;
+import com.aerospike.client.sdk.TypedKeyList;
+import com.aerospike.client.sdk.TypedRecordStream;
 import com.aerospike.client.sdk.cdt.MapOrder;
 import com.aerospike.examples.Async;
 import com.aerospike.examples.UseCase;
 import com.aerospike.examples.transactionprocessing.model.Account;
 import com.aerospike.examples.transactionprocessing.model.Transaction;
-import com.aerospike.examples.transactionprocessing.model.TransactionMapper;
 
 /**
  * SDK port of the legacy {@code TopTransactionsAcrossDcs} (see ../../java). Transactions can
@@ -67,19 +67,19 @@ public class TopTransactionsAcrossDcs implements UseCase {
         return "https://github.com/aerospike-examples/use-case-cookbook/blob/main/UseCases/top-transactions-across-dcs.md";
     }
 
-    private DataSet accounts() {
-        return DataSet.of(System.getProperty("demo.namespace", "test"), "uccb_account");
+    private TypedDataSet<Account> accounts() {
+        return TypedDataSet.of(System.getProperty("demo.namespace", "test"), "uccb_account", Account.class);
     }
 
-    private DataSet transactions() {
-        return DataSet.of(System.getProperty("demo.namespace", "test"), "uccb_txn");
+    private TypedDataSet<Transaction> transactions() {
+        return TypedDataSet.of(System.getProperty("demo.namespace", "test"), "uccb_txn", Transaction.class);
     }
 
-    public Key getAccountKey(String id) {
+    public TypedKey<Account> getAccountKey(String id) {
         return accounts().id(id);
     }
 
-    public Key getTransactionKey(String id) {
+    public TypedKey<Transaction> getTransactionKey(String id) {
         return transactions().id(id);
     }
 
@@ -89,7 +89,7 @@ public class TopTransactionsAcrossDcs implements UseCase {
 
     @Override
     public void setup(Session session) throws Exception {
-        DataSet accounts = accounts();
+        TypedDataSet<Account> accounts = accounts();
         session.truncate(accounts);
         session.truncate(transactions());
 
@@ -195,21 +195,12 @@ public class TopTransactionsAcrossDcs implements UseCase {
                 .map(v -> (String) v)
                 .collect(Collectors.toList());
 
-        List<Key> keys = txnIds.stream().map(this::getTransactionKey).collect(Collectors.toList());
-        TransactionMapper mapper = (TransactionMapper) session.getCluster().getRecordMappingFactory().getMapper(Transaction.class);
+        TypedKeyList<Transaction> keys = new TypedKeyList<>();
+        txnIds.forEach(id -> keys.add(getTransactionKey(id)));
 
-        List<Transaction> txns = new ArrayList<>();
-        try (RecordStream stream = session.query(keys).execute()) {
-            for (RecordResult r : stream.stream().toList()) {
-                if (txns.size() >= count) {
-                    break;
-                }
-                if (r.isOk()) {
-                    Record rec = r.recordOrThrow();
-                    txns.add(mapper.fromMap(rec.bins, r.getKey(), rec.generation));
-                }
-            }
+        try (TypedRecordStream<Transaction> stream = session.query(keys).execute()) {
+            List<Transaction> txns = stream.toObjectList();
+            return txns.size() > count ? new ArrayList<>(txns.subList(0, count)) : txns;
         }
-        return txns;
     }
 }

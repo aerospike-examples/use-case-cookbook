@@ -12,12 +12,12 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
-import com.aerospike.client.sdk.DataSet;
-import com.aerospike.client.sdk.Key;
-import com.aerospike.client.sdk.Record;
 import com.aerospike.client.sdk.RecordResult;
 import com.aerospike.client.sdk.RecordStream;
 import com.aerospike.client.sdk.Session;
+import com.aerospike.client.sdk.TypedDataSet;
+import com.aerospike.client.sdk.TypedKey;
+import com.aerospike.client.sdk.TypedKeyList;
 import com.aerospike.examples.UseCase;
 import com.aerospike.examples.manytomany.model.Account;
 import com.aerospike.examples.manytomany.model.Customer;
@@ -58,12 +58,12 @@ public class ManyToManyRelationships implements UseCase {
         return "https://github.com/aerospike-examples/use-case-cookbook/blob/main/UseCases/many-to-many-relationships.md";
     }
 
-    private DataSet accounts() {
-        return DataSet.of(System.getProperty("demo.namespace", "test"), "uccb_account");
+    private TypedDataSet<Account> accounts() {
+        return TypedDataSet.of(System.getProperty("demo.namespace", "test"), "uccb_account", Account.class);
     }
 
-    private DataSet customers() {
-        return DataSet.of(System.getProperty("demo.namespace", "test"), "uccb_customer");
+    private TypedDataSet<Customer> customers() {
+        return TypedDataSet.of(System.getProperty("demo.namespace", "test"), "uccb_customer", Customer.class);
     }
 
     private Customer randomCustomer(String custId) {
@@ -92,7 +92,8 @@ public class ManyToManyRelationships implements UseCase {
             tx.upsert(accounts()).object(account).execute();
             tx.upsert(accounts().id(account.getId())).bin("owners").setTo(ownerIds).execute();
 
-            List<Key> customerKeys = ownerIds.stream().map(id -> customers().id(id)).collect(Collectors.toList());
+            TypedKeyList<Customer> customerKeys = new TypedKeyList<>();
+            ownerIds.forEach(id -> customerKeys.add(customers().id(id)));
             try (RecordStream stream = tx.upsert(customerKeys)
                     .bin("accounts").listAppend(account.getId(), opts -> opts.addUnique().allowFailures())
                     .execute()) {
@@ -103,8 +104,8 @@ public class ManyToManyRelationships implements UseCase {
 
     @Override
     public void setup(Session session) throws Exception {
-        DataSet accounts = accounts();
-        DataSet customers = customers();
+        TypedDataSet<Account> accounts = accounts();
+        TypedDataSet<Customer> customers = customers();
         session.truncate(accounts);
         session.truncate(customers);
 
@@ -142,13 +143,13 @@ public class ManyToManyRelationships implements UseCase {
             return Map.of();
         }
 
-        List<Key> accountKeys = new ArrayList<>();
+        TypedKeyList<Account> accountKeys = new TypedKeyList<>();
         for (Object accountId : accountIds) {
             accountKeys.add(accounts().id((String) accountId));
         }
 
         Map<String, Integer> counts = new HashMap<>();
-        try (RecordStream stream = session.query(accountKeys).readingOnlyBins("owners").execute()) {
+        try (RecordStream stream = session.query(accountKeys).readingOnlyBins("owners").execute().asUntypedRecordStream()) {
             stream.forEach(result -> {
                 if (result.isOk()) {
                     List<?> owners = result.recordOrThrow().getList("owners");

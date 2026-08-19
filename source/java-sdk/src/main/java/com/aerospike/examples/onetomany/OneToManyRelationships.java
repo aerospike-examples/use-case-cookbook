@@ -6,16 +6,16 @@ import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.ThreadLocalRandom;
 
-import com.aerospike.client.sdk.DataSet;
-import com.aerospike.client.sdk.Key;
 import com.aerospike.client.sdk.Record;
 import com.aerospike.client.sdk.RecordResult;
-import com.aerospike.client.sdk.RecordStream;
 import com.aerospike.client.sdk.Session;
+import com.aerospike.client.sdk.TypedDataSet;
+import com.aerospike.client.sdk.TypedKey;
+import com.aerospike.client.sdk.TypedKeyList;
+import com.aerospike.client.sdk.TypedRecordStream;
 import com.aerospike.examples.UseCase;
 import com.aerospike.examples.onetomany.model.Agent;
 import com.aerospike.examples.onetomany.model.Listing;
-import com.aerospike.examples.onetomany.model.ListingMapper;
 
 /**
  * SDK port of the legacy {@code OneToManyRelationships} (see ../../java). Demonstrates a
@@ -53,12 +53,12 @@ public class OneToManyRelationships implements UseCase {
         return "https://github.com/aerospike-examples/use-case-cookbook/blob/main/UseCases/one-to-many-relationships.md";
     }
 
-    private DataSet agents() {
-        return DataSet.of(System.getProperty("demo.namespace", "test"), "uccb_agent");
+    private TypedDataSet<Agent> agents() {
+        return TypedDataSet.of(System.getProperty("demo.namespace", "test"), "uccb_agent", Agent.class);
     }
 
-    private DataSet listings() {
-        return DataSet.of(System.getProperty("demo.namespace", "test"), "uccb_listing");
+    private TypedDataSet<Listing> listings() {
+        return TypedDataSet.of(System.getProperty("demo.namespace", "test"), "uccb_listing", Listing.class);
     }
 
     private Agent randomAgent(long agentId) {
@@ -100,8 +100,8 @@ public class OneToManyRelationships implements UseCase {
 
     @Override
     public void setup(Session session) throws Exception {
-        DataSet agents = agents();
-        DataSet listings = listings();
+        TypedDataSet<Agent> agents = agents();
+        TypedDataSet<Listing> listings = listings();
         session.truncate(agents);
         session.truncate(listings);
 
@@ -129,7 +129,7 @@ public class OneToManyRelationships implements UseCase {
      */
     public void addListing(Session session, long agentId, Listing listing) {
         listing.setAgentId(agentId);
-        DataSet listings = listings();
+        TypedDataSet<Listing> listings = listings();
         session.doInTransaction(tx -> {
             tx.upsert(listings).object(listing).execute();
             tx.upsert(agents().id(agentId))
@@ -143,7 +143,7 @@ public class OneToManyRelationships implements UseCase {
      * transaction. Returns {@code false} if the listing did not exist.
      */
     public boolean deleteListing(Session session, String listingId) {
-        Key listingKey = listings().id(listingId);
+        TypedKey<Listing> listingKey = listings().id(listingId);
         return session.doInTransactionReturning(tx -> {
             Optional<RecordResult> existing = tx.query(listingKey).readingOnlyBins("agentId").execute().getFirst();
             if (existing.isEmpty() || !existing.get().isOk()) {
@@ -164,8 +164,7 @@ public class OneToManyRelationships implements UseCase {
      * batch-reads every listing referenced by it.
      */
     public List<Listing> getListings(Session session, long agentId) {
-        Key agentKey = agents().id(agentId);
-        ListingMapper mapper = (ListingMapper) session.getCluster().getRecordMappingFactory().getMapper(Listing.class);
+        TypedKey<Agent> agentKey = agents().id(agentId);
 
         return session.doInTransactionReturning(tx -> {
             Optional<RecordResult> agentResult = tx.query(agentKey).readingOnlyBins("listings").execute().getFirst();
@@ -178,19 +177,14 @@ public class OneToManyRelationships implements UseCase {
                 return List.<Listing>of();
             }
 
-            List<Key> keys = new ArrayList<>();
+            TypedKeyList<Listing> keys = new TypedKeyList<>();
             for (Object listingId : listingIds) {
                 keys.add(listings().id((String) listingId));
             }
 
             List<Listing> results = new ArrayList<>();
-            try (RecordStream stream = tx.query(keys).execute()) {
-                stream.forEach(result -> {
-                    if (result.isOk()) {
-                        Record record = result.recordOrThrow();
-                        results.add(mapper.fromMap(record.bins, result.getKey(), record.generation));
-                    }
-                });
+            try (TypedRecordStream<Listing> stream = tx.query(keys).execute()) {
+                stream.forEachObject(results::add);
             }
             return results;
         });

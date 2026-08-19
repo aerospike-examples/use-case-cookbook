@@ -12,11 +12,11 @@ import java.util.Set;
 import java.util.concurrent.ThreadLocalRandom;
 
 import com.aerospike.client.sdk.ChainableOperationBuilder;
-import com.aerospike.client.sdk.DataSet;
-import com.aerospike.client.sdk.Key;
 import com.aerospike.client.sdk.Record;
 import com.aerospike.client.sdk.RecordResult;
 import com.aerospike.client.sdk.Session;
+import com.aerospike.client.sdk.TypedDataSet;
+import com.aerospike.client.sdk.TypedKey;
 import com.aerospike.client.sdk.cdt.MapOrder;
 import com.aerospike.examples.UseCase;
 import com.aerospike.examples.recordversioning.model.TradeBase;
@@ -68,15 +68,15 @@ public class DeltaVersioningRecords implements UseCase {
         return "https://github.com/aerospike-examples/use-case-cookbook/blob/main/UseCases/versioning-records-delta.md";
     }
 
-    private DataSet tradeBases() {
-        return DataSet.of(System.getProperty("demo.namespace", "test"), "uccb_tradebase");
+    private TypedDataSet<TradeBase> tradeBases() {
+        return TypedDataSet.of(System.getProperty("demo.namespace", "test"), "uccb_tradebase", TradeBase.class);
     }
 
-    private Key formKey(long id) {
+    private TypedKey<TradeBase> formKey(long id) {
         return tradeBases().id(id);
     }
 
-    private Key formKey(long id, int version) {
+    private TypedKey<TradeBase> formKey(long id, int version) {
         return tradeBases().id(id + ":" + version);
     }
 
@@ -157,7 +157,7 @@ public class DeltaVersioningRecords implements UseCase {
     public int updateTradeBaseWithDelta(Session session, long id, long timestamp, String description, String user,
             Map<String, Object> newValues) {
         return session.doInTransactionReturning(tx -> {
-            Key key = formKey(id);
+            TypedKey<TradeBase> key = formKey(id);
             Optional<RecordResult> existing = tx.query(key).execute().getFirst();
 
             Map<String, Object> before = new HashMap<>();

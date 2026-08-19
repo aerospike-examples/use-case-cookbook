@@ -12,6 +12,8 @@ import com.aerospike.client.sdk.Key;
 import com.aerospike.client.sdk.Record;
 import com.aerospike.client.sdk.RecordResult;
 import com.aerospike.client.sdk.Session;
+import com.aerospike.client.sdk.TypedDataSet;
+import com.aerospike.client.sdk.TypedKeyList;
 import com.aerospike.client.sdk.cdt.MapOrder;
 import com.aerospike.client.sdk.cdt.MapReturnType;
 import com.aerospike.client.sdk.exp.Exp;
@@ -69,8 +71,8 @@ public class Leaderboard implements UseCase {
         return "https://github.com/aerospike-examples/use-case-cookbook/blob/main/UseCases/leaderboard.md";
     }
 
-    private DataSet players() {
-        return DataSet.of(System.getProperty("demo.namespace", "test"), "uccb_player");
+    private TypedDataSet<Player> players() {
+        return TypedDataSet.of(System.getProperty("demo.namespace", "test"), "uccb_player", Player.class);
     }
 
     private DataSet scoreboard() {
@@ -88,7 +90,7 @@ public class Leaderboard implements UseCase {
 
     @Override
     public void setup(Session session) throws Exception {
-        DataSet players = players();
+        TypedDataSet<Player> players = players();
         session.truncate(players);
         session.truncate(scoreboard());
 
@@ -153,7 +155,8 @@ public class Leaderboard implements UseCase {
     }
 
     private void populateFullPlayerDetails(Session session, List<Player> players) {
-        List<Key> keys = players.stream().map(player -> players().id(player.getId())).toList();
+        TypedKeyList<Player> keys = new TypedKeyList<>();
+        players.forEach(player -> keys.add(players().id(player.getId())));
         try (var stream = session.query(keys).execute()) {
             List<RecordResult> results = stream.stream().toList();
             for (int i = 0; i < results.size(); i++) {
@@ -251,6 +254,17 @@ public class Leaderboard implements UseCase {
      * Gets the scores on either side of a player's score. Queries this player's index within its
      * bucket's map and returns a clamped index range either side of it, pulling in extra entries
      * from neighboring buckets if the range overflows the current bucket.
+     * <p/>
+     * Kept as nested {@code Exp.let}/{@code Exp.def}/{@code Exp.cond} builder calls rather than an
+     * AEL string (unlike {@code AdvancedExpressions}): AEL's dot-call syntax handles simple bin/CDT
+     * expressions fine (verified against a live cluster), but a same-syntax attempt at this map
+     * {@code getByKey(..., INDEX)}/{@code getByIndexRange} composition returned a server-side
+     * "Parameter error" - almost certainly because AEL needs an explicit value-type hint for an
+     * {@code INDEX}-return map lookup (the Java API requires one - {@code Exp.Type.INT} - as an
+     * explicit 4th argument) that isn't documented anywhere accessible here. Rather than guess at
+     * syntax for a scoring-correctness-critical expression, this stays on the already-verified Exp
+     * builder form - worth revisiting once an authoritative AEL grammar reference for map/list
+     * return-type composition is available.
      */
     public List<Player> getScoresAroundPlayer(Session session, int playerId, int score, int numPlayersEitherSide) {
         String mapKey = getMapKey(playerId, score);

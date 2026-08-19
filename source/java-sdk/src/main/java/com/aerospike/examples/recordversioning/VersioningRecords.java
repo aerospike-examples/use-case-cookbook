@@ -10,16 +10,15 @@ import java.util.Optional;
 import java.util.concurrent.ThreadLocalRandom;
 
 import com.aerospike.client.sdk.ChainableOperationBuilder;
-import com.aerospike.client.sdk.DataSet;
-import com.aerospike.client.sdk.Key;
 import com.aerospike.client.sdk.Record;
 import com.aerospike.client.sdk.RecordResult;
 import com.aerospike.client.sdk.Session;
+import com.aerospike.client.sdk.TypedDataSet;
+import com.aerospike.client.sdk.TypedKey;
 import com.aerospike.client.sdk.cdt.MapOrder;
 import com.aerospike.examples.Async;
 import com.aerospike.examples.UseCase;
 import com.aerospike.examples.recordversioning.model.TradeBase;
-import com.aerospike.examples.recordversioning.model.TradeBaseMapper;
 import com.aerospike.examples.recordversioning.model.TradeStaticData;
 
 /**
@@ -66,26 +65,26 @@ public class VersioningRecords implements UseCase {
         return "https://github.com/aerospike-examples/use-case-cookbook/blob/main/UseCases/versioning-records.md";
     }
 
-    private DataSet tradeBases() {
-        return DataSet.of(System.getProperty("demo.namespace", "test"), "uccb_tradebase");
+    private TypedDataSet<TradeBase> tradeBases() {
+        return TypedDataSet.of(System.getProperty("demo.namespace", "test"), "uccb_tradebase", TradeBase.class);
     }
 
-    private DataSet tradeContents() {
-        return DataSet.of(System.getProperty("demo.namespace", "test"), "uccb_tradecontent");
+    private TypedDataSet<TradeStaticData> tradeContents() {
+        return TypedDataSet.of(System.getProperty("demo.namespace", "test"), "uccb_tradecontent", TradeStaticData.class);
     }
 
-    private Key formKey(DataSet dataSet, long id) {
+    private <T> TypedKey<T> formKey(TypedDataSet<T> dataSet, long id) {
         return dataSet.id(id);
     }
 
-    private Key formKey(DataSet dataSet, long id, int version) {
+    private <T> TypedKey<T> formKey(TypedDataSet<T> dataSet, long id, int version) {
         return version < 0 ? formKey(dataSet, id) : dataSet.id(id + ":" + version);
     }
 
     @Override
     public void setup(Session session) throws Exception {
-        DataSet tradeBases = tradeBases();
-        DataSet tradeContents = tradeContents();
+        TypedDataSet<TradeBase> tradeBases = tradeBases();
+        TypedDataSet<TradeStaticData> tradeContents = tradeContents();
         session.truncate(tradeBases);
         session.truncate(tradeContents);
 
@@ -174,16 +173,16 @@ public class VersioningRecords implements UseCase {
      *
      * @return the new version number
      */
-    private int updateObjectWithVersion(Session session, DataSet dataSet, long id, long timestamp, ChangeHandler handler) {
+    private <T> int updateObjectWithVersion(Session session, TypedDataSet<T> dataSet, long id, long timestamp, ChangeHandler handler) {
         return session.doInTransactionReturning(tx -> {
-            Key unversionedKey = formKey(dataSet, id);
+            TypedKey<T> unversionedKey = formKey(dataSet, id);
             Record rec = tx.query(unversionedKey).execute().getFirst().orElseThrow().recordOrThrow();
 
             int currentVersion = rec.getInt("version");
             Object versionsBin = rec.getValue("versions");
 
             // Copy the current effective record (except "versions") to a new historical, immutable record.
-            Key versionedKey = formKey(dataSet, id, currentVersion);
+            TypedKey<T> versionedKey = formKey(dataSet, id, currentVersion);
             ChainableOperationBuilder copyOp = tx.insert(versionedKey);
             for (Map.Entry<String, Object> entry : rec.bins.entrySet()) {
                 if (!"versions".equals(entry.getKey())) {
@@ -224,8 +223,8 @@ public class VersioningRecords implements UseCase {
      * timestamp + 1}, then step back one entry.
      */
     private TradeBase readAtTime(Session session, long id, long timestamp) {
-        DataSet tradeBases = tradeBases();
-        Key unversionedKey = formKey(tradeBases, id);
+        TypedDataSet<TradeBase> tradeBases = tradeBases();
+        TypedKey<TradeBase> unversionedKey = formKey(tradeBases, id);
 
         // The read-side query builder doesn't expose onMapKeyRelativeIndexRange (only the write-side
         // one does) - go through upsert() purely as a vehicle for that CDT sub-op. No bin is set, so
@@ -246,24 +245,19 @@ public class VersioningRecords implements UseCase {
         }
         long version = versionsResult.values().iterator().next();
 
-        TradeBaseMapper mapper = (TradeBaseMapper) session.getCluster().getRecordMappingFactory().getMapper(TradeBase.class);
         if (version == -1) {
-            Optional<RecordResult> full = session.query(unversionedKey).execute().getFirst();
-            Record fullRec = full.orElseThrow().recordOrThrow();
-            return mapper.fromMap(fullRec.bins, unversionedKey, fullRec.generation);
+            return session.query(unversionedKey).execute().getFirstObject().orElseThrow();
         }
         else {
-            Key versionedKey = formKey(tradeBases, id, (int) version);
-            Optional<RecordResult> historical = session.query(versionedKey).execute().getFirst();
-            Record historicalRec = historical.orElseThrow().recordOrThrow();
-            return mapper.fromMap(historicalRec.bins, versionedKey, historicalRec.generation);
+            TypedKey<TradeBase> versionedKey = formKey(tradeBases, id, (int) version);
+            return session.query(versionedKey).execute().getFirstObject().orElseThrow();
         }
     }
 
     @Override
     public void run(Session session) throws Exception {
-        DataSet tradeBases = tradeBases();
-        DataSet tradeContents = tradeContents();
+        TypedDataSet<TradeBase> tradeBases = tradeBases();
+        TypedDataSet<TradeStaticData> tradeContents = tradeContents();
 
         Async.runFor(Duration.ofSeconds(5), async -> {
             async.periodic(Duration.ofMillis(200), () -> {

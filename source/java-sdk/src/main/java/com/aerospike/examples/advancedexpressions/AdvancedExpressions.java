@@ -144,25 +144,29 @@ public class AdvancedExpressions implements UseCase {
         System.out.println("Record before augmenting:");
         showCar(1, session.query(key).execute().getFirst().orElseThrow().recordOrThrow());
 
+        // Written as AEL rather than nested Exp.let/Exp.def/Exp.cond builder calls - much easier to
+        // read once the nesting gets this deep, and it's the same expression the server evaluates.
         session.upsert(key)
-                .bin("features").upsertFrom(Exp.let(
-                        Exp.def("color", Exp.cond(
-                                Exp.eq(Exp.stringBin("color"), Exp.val("Purple")),
-                                ListExp.append(ListPolicy.Default, Exp.val("Great Color"), Exp.listBin("features")),
-                                Exp.listBin("features"))),
-                        Exp.def("type", Exp.cond(
-                                Exp.eq(Exp.stringBin("bodyType"), Exp.val("CONVERTIBLE")),
-                                ListExp.append(ListPolicy.Default, Exp.val("Looks Cool"), Exp.var("color")),
-                                Exp.var("color"))),
-                        Exp.def("power", Exp.cond(
-                                Exp.gt(Exp.floatBin("engineSize"), Exp.val(5.0)),
-                                ListExp.append(ListPolicy.Default, Exp.val("Powerful"), Exp.var("type")),
-                                Exp.var("type"))),
-                        Exp.def("age", Exp.cond(
-                                Exp.ge(Exp.intBin("year"), Exp.val(2020)),
-                                ListExp.append(ListPolicy.Default, Exp.val("New-ish"), Exp.var("power")),
-                                Exp.var("power"))),
-                        Exp.var("age")))
+                .bin("features").upsertFrom("""
+                        let (
+                          color = when (
+                            $.color == 'Purple' => $.features.append('Great Color'),
+                            default => $.features
+                          ),
+                          type = when (
+                            $.bodyType == 'CONVERTIBLE' => (${color}).append('Looks Cool'),
+                            default => ${color}
+                          ),
+                          power = when (
+                            $.engineSize > 5.0 => (${type}).append('Powerful'),
+                            default => ${type}
+                          ),
+                          age = when (
+                            $.year >= 2020 => (${power}).append('New-ish'),
+                            default => ${power}
+                          )
+                        ) then (${age})
+                        """)
                 .execute();
         System.out.println("Record after augmenting:");
         showCar(1, session.query(key).execute().getFirst().orElseThrow().recordOrThrow());

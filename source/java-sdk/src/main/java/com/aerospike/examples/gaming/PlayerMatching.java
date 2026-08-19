@@ -12,11 +12,13 @@ import java.util.concurrent.atomic.AtomicInteger;
 import com.aerospike.client.sdk.AerospikeException;
 import com.aerospike.client.sdk.ChainableOperationBuilder;
 import com.aerospike.client.sdk.DataSet;
-import com.aerospike.client.sdk.Key;
 import com.aerospike.client.sdk.Record;
 import com.aerospike.client.sdk.RecordResult;
 import com.aerospike.client.sdk.ResultCode;
 import com.aerospike.client.sdk.Session;
+import com.aerospike.client.sdk.TypedDataSet;
+import com.aerospike.client.sdk.TypedKey;
+import com.aerospike.client.sdk.TypedKeyList;
 import com.aerospike.client.sdk.exp.Exp;
 import com.aerospike.examples.Async;
 import com.aerospike.examples.UseCase;
@@ -68,8 +70,8 @@ public class PlayerMatching implements UseCase {
                 + "their opponents 80% of the time. If a player with a shield attacks during a shield, the shield is removed.";
     }
 
-    private DataSet players() {
-        return DataSet.of(System.getProperty("demo.namespace", "test"), "uccb_player");
+    private TypedDataSet<Player> players() {
+        return TypedDataSet.of(System.getProperty("demo.namespace", "test"), "uccb_player", Player.class);
     }
 
     private DataSet scoreboard() {
@@ -87,7 +89,7 @@ public class PlayerMatching implements UseCase {
 
     @Override
     public void setup(Session session) throws Exception {
-        DataSet players = players();
+        TypedDataSet<Player> players = players();
         session.truncate(players);
         session.truncate(scoreboard());
 
@@ -146,7 +148,7 @@ public class PlayerMatching implements UseCase {
      * them (sets {@code beingAttackedBy}) atomically, retrying with another candidate if the claim
      * fails because the candidate stopped being eligible in the meantime.
      */
-    public Optional<Player> findPlayerToAttack(Session session, int attackerId, List<Key> possibilities) {
+    public Optional<Player> findPlayerToAttack(Session session, int attackerId, TypedKeyList<Player> possibilities) {
         Exp filter = getPlayerFilter();
         List<Record> validRecords = new ArrayList<>();
         try (var stream = session.query(possibilities).where(filter).execute()) {
@@ -192,10 +194,10 @@ public class PlayerMatching implements UseCase {
     /** Given an attacker, finds a player of similar strength who is available to attack. */
     public Optional<Player> findPlayerToAttack(Session session, Player attacker) {
         List<Player> similarScores = leaderboard.getScoresAroundPlayer(session, attacker.getId(), attacker.getScore(), 20);
-        List<Key> keys = similarScores.stream()
+        TypedKeyList<Player> keys = new TypedKeyList<>();
+        similarScores.stream()
                 .filter(player -> player.getId() != attacker.getId())
-                .map(player -> getPlayerKey(player.getId()))
-                .toList();
+                .forEach(player -> keys.add(getPlayerKey(player.getId())));
         return findPlayerToAttack(session, attacker.getId(), keys);
     }
 
@@ -270,7 +272,7 @@ public class PlayerMatching implements UseCase {
                 Exp.gt(Exp.intBin("score"), Exp.val(400)));
     }
 
-    public Key getPlayerKey(int id) {
+    public TypedKey<Player> getPlayerKey(int id) {
         return players().id(id);
     }
 

@@ -4,13 +4,11 @@ import java.util.Date;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 
-import com.aerospike.client.sdk.DataSet;
-import com.aerospike.client.sdk.Record;
-import com.aerospike.client.sdk.RecordStream;
 import com.aerospike.client.sdk.Session;
+import com.aerospike.client.sdk.TypedDataSet;
+import com.aerospike.client.sdk.TypedRecordStream;
 import com.aerospike.examples.UseCase;
 import com.aerospike.examples.setup.model.Account;
-import com.aerospike.examples.setup.model.AccountMapper;
 
 /**
  * SDK port of the legacy {@code SetupDemo} (see ../../java). The legacy version seeds data with
@@ -18,6 +16,10 @@ import com.aerospike.examples.setup.model.AccountMapper;
  * instead) and the Java Object Mapper; here object mapping is done via the SDK's own
  * {@code RecordMapper}/{@code Cluster.setRecordMappingFactory} mechanism (see {@link
  * com.aerospike.examples.setup.model.AccountMapper}, registered in {@code UseCaseCookbookRunner}).
+ * <p/>
+ * Uses {@link TypedDataSet} rather than a raw {@code DataSet} so reads decode straight to
+ * {@link Account} via the registered mapper ({@link TypedRecordStream#forEachObject}), with no
+ * manual {@code getMapper(...).fromMap(...)} step.
  */
 public class SetupDemo implements UseCase {
 
@@ -40,8 +42,8 @@ public class SetupDemo implements UseCase {
         return "https://github.com/aerospike-examples/use-case-cookbook/blob/main/UseCases/setup.md";
     }
 
-    private DataSet accounts() {
-        return DataSet.of(System.getProperty("demo.namespace", "test"), "uccb_account");
+    private TypedDataSet<Account> accounts() {
+        return TypedDataSet.of(System.getProperty("demo.namespace", "test"), "uccb_account", Account.class);
     }
 
     private Account randomAccount() {
@@ -55,7 +57,7 @@ public class SetupDemo implements UseCase {
 
     @Override
     public void setup(Session session) throws Exception {
-        DataSet accounts = accounts();
+        TypedDataSet<Account> accounts = accounts();
         session.truncate(accounts);
 
         System.out.printf("Generating %,d accounts...%n", NUM_ACCOUNTS);
@@ -68,20 +70,14 @@ public class SetupDemo implements UseCase {
 
     @Override
     public void run(Session session) throws Exception {
-        DataSet accounts = accounts();
-        AccountMapper mapper = (AccountMapper) session.getCluster().getRecordMappingFactory().getMapper(Account.class);
-
         System.out.println("Query first 100 accounts");
-        try (RecordStream recordStream = session.query(accounts).limit(100).execute()) {
-            recordStream.forEach(result -> {
-                Record record = result.recordOrThrow();
-                Account account = mapper.fromMap(record.bins, result.getKey(), record.generation);
-                System.out.printf("Id: %s, Account Name: %s, Balance $%.02f, Date Opened: %s%n",
-                        account.getId(),
-                        account.getAccountName(),
-                        account.getBalanceInCents() / 100.0,
-                        account.getDateOpened());
-            });
+        try (TypedRecordStream<Account> recordStream = session.query(accounts()).limit(100).execute()) {
+            recordStream.forEachObject(account -> System.out.printf(
+                    "Id: %s, Account Name: %s, Balance $%.02f, Date Opened: %s%n",
+                    account.getId(),
+                    account.getAccountName(),
+                    account.getBalanceInCents() / 100.0,
+                    account.getDateOpened()));
         }
     }
 }

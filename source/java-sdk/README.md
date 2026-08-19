@@ -38,14 +38,63 @@ every mapper once in `UseCaseCookbookRunner.buildMappers()` via
 `Cluster.setRecordMappingFactory(new DefaultRecordMappingFactory(mappers))` — mirroring the single
 client+mapper pair the legacy runner builds and hands to every use case.
 
-- **Writes:** `session.upsert(dataSet).object(pojo).execute()` (also `insert`/`update`/`replace`).
-- **Reads:** there's no `RecordResult.as(Class)` shortcut in this SDK version, so fetch the
-  registered mapper and decode manually:
-  `session.getCluster().getRecordMappingFactory().getMapper(Foo.class).fromMap(record.bins, result.getKey(), record.generation)`.
+**Prefer `TypedDataSet<T>`/`TypedKey<T>` over raw `DataSet`/`Key`** wherever a use case actually
+does object mapping (i.e. calls `.object(pojo)` to write, or wants a decoded `T` back on read) —
+every use case in this port follows this now:
+
+- Declare the dataset as `TypedDataSet.of(namespace, set, Foo.class)` instead of `DataSet.of(...)`.
+- `.id(...)` on it returns a `TypedKey<Foo>` instead of a plain `Key`; `session`/transaction
+  `upsert`/`query`/`delete`/etc. all have matching `TypedKey<T>`/`TypedKeyList<T>` overloads.
+- **Writes:** unchanged in shape — `session.upsert(typedDataSet).object(pojo).execute()` — but now
+  type-checked against `T` instead of accepting any `Object`.
+- **Reads:** `session.query(typedKey).execute()` returns a `TypedRecordStream<T>` with
+  `getFirstObject()`/`toObjectList()`/`forEachObject(Consumer<T>)`, which decode via the registered
+  mapper automatically. This removes the manual
+  `session.getCluster().getRecordMappingFactory().getMapper(Foo.class).fromMap(record.bins, key, generation)`
+  step entirely — no use case in this port needs to call `getMapper(...)` directly anymore.
+
+Raw `DataSet`/`Key` are still the right tool where there's no single mapped type to decode to —
+e.g. `TimeSeriesDemo`/`TimeSeriesLargeVarianceDemo`'s event records (events live nested inside a
+bucket record's map bin, not as their own top-level object) and the hot-key use cases' replica
+records (raw bin writes to a custom `productId:index` key, not the model's own mapped id).
 
 The [Java Object Generator](https://github.com/aerospike-examples/java-object-generator) isn't
 wired up here (same manual-install gap as `../java`) — sample data is hand-generated with
 `ThreadLocalRandom` instead.
+
+## Expressions: prefer AEL over nested `Exp` builder chains
+
+For simple filter/read expressions, the `Exp`/`MapExp`/`ListExp` fluent builders read fine. Once an
+expression nests more than one or two levels deep (`Exp.let` + several `Exp.def`/`Exp.cond`
+levels), it gets hard to read and easy to mis-nest. This SDK can compile **AEL** (Aerospike
+Expression Language) strings directly wherever an `Exp`/`Expression` is accepted —
+`BinBuilder.selectFrom(String)`/`upsertFrom(String)` parse the string themselves (no separate
+`AelMaterializer` call needed for that path); `AelMaterializer.expressionFromString(Cluster,
+String)` is available if you need a reusable `Expression` object instead (e.g. for `where(...)`).
+
+`AdvancedExpressions.multipleCommandsInOneOperation` is the reference example — the legacy client's
+4-level `Exp.let`/`Exp.def`/`Exp.cond` chain becomes:
+
+```
+let (
+  color = when ($.color == 'Purple' => $.features.append('Great Color'), default => $.features),
+  type  = when ($.bodyType == 'CONVERTIBLE' => (${color}).append('Looks Cool'), default => ${color}),
+  power = when ($.engineSize > 5.0 => (${type}).append('Powerful'), default => ${type}),
+  age   = when ($.year >= 2020 => (${power}).append('New-ish'), default => ${power})
+) then (${age})
+```
+passed straight to `.bin("features").upsertFrom("""...""")` — verified against a live cluster to
+produce identical results to the builder-chain version.
+
+**This doesn't extend to every CDT composition yet.** `Leaderboard.getScoresAroundPlayer` composes
+a map `getByKey(..., INDEX)` lookup with a `getByIndexRange`; the equivalent AEL dot-call syntax
+(`$.score.getByKey('key', INDEX)`) parses fine client-side but returns a server-side `Parameter
+error` at execution time — almost certainly because an `INDEX`-return map lookup needs an explicit
+value-type hint (the Java API requires one, `Exp.Type.INT`, as an explicit argument) that isn't
+documented anywhere accessible from this build. Rather than guess at syntax for a
+scoring-correctness-critical expression, that one stays on the already-verified `Exp` builder form
+- see the comment on `getScoresAroundPlayer` for details. Worth revisiting once an authoritative
+AEL grammar reference for map/list return-type composition is available.
 
 ## Known limitations (alpha SDK)
 
@@ -57,13 +106,16 @@ wired up here (same manual-install gap as `../java`) — sample data is hand-gen
   `doInTransactionReturning` without a real `Txn` attached — same idea as the legacy client's
   `AerospikeClientProxy` shim, just implemented via the SDK's `SessionExtension` hook instead of a
   dynamic proxy.
-- **A few nested/composed CDT expressions don't evaluate correctly on this alpha build** (nested
+- **A few nested/composed CDT expressions don't evaluate correctly against this cluster** (nested
   `MapExp` compositions returning `Parameter error`, and some write-side conditional expressions
   chaining multiple CDT ops). Where hit, the affected use case (`TimeSeriesDemo`'s device filter,
   `TimeSeriesLargeVarianceDemo`'s bucket-split write path, `TopTransactionsAcrossDcs`'s DC-map
   merge) falls back to an equivalent client-side implementation instead of forcing the
-  server-side version — each is called out in a comment at the top of the affected class. Worth
-  re-checking against later SDK builds.
+  server-side version — each is called out in a comment at the top of the affected class. Note:
+  the specific `TimeSeriesDemo` device-filter gap was confirmed to reproduce identically on the
+  mature legacy Java client (`../java`) against the same cluster build, so that one is a
+  server-side expression-evaluator limitation on this Aerospike build, not an SDK-maturity gap —
+  worth re-checking against a different server build rather than a different SDK version.
 - Not every alpha SDK method exists on both the read and write sides of the fluent API — e.g.
   `onMapKeyRelativeIndexRange` is only on the write-side `BinBuilder`, not the read-side
   `QueryBinBuilder`. `VersioningRecords` works around this by issuing a read-only lookup through

@@ -73,8 +73,8 @@ public class ReadHotKeyUseCase implements UseCase {
 
         Key primaryKey = HotKeyKeys.primary(mapper, productId);
         long sideOpIntervalMs = HotKeySimulationParams.PERIODIC_SIDE_OP_INTERVAL_MS;
-        Runnable refreshAllCopies = () -> HotKeyProductSetup.incrementUnitsSoldOnAllCopies(
-                client, mapper, replicaCount);
+        HotKeySimulation.OperationAttempt refreshAllCopies = () ->
+                HotKeyProductSetup.incrementUnitsSoldOnAllCopies(client, mapper, replicaCount);
 
         try (HotKeyPendingLimitScope ignored = HotKeyPendingLimitScope.apply(client, mapper,
                 HotKeySimulationParams.TRANSACTION_PENDING_LIMIT.get())) {

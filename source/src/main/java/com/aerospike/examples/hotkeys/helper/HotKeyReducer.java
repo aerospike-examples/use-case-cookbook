@@ -16,13 +16,15 @@ import com.aerospike.client.IAerospikeClient;
 import com.aerospike.client.Key;
 import com.aerospike.client.Operation;
 import com.aerospike.client.Record;
+import com.aerospike.client.Txn;
 import com.aerospike.client.exp.Expression;
 import com.aerospike.client.policy.WritePolicy;
 
 /**
  * Vendored from the standalone hot-key-reducer project for use-case-cookbook demonstrations.
  * Original package: {@code com.aerospike.helper}. See {@code ReducerHotKeyUseCase} for integration
- * and tuning notes marked REVIEW.
+ * and tuning notes marked REVIEW. In-memory batches are partitioned by {@code (Key, Txn)} so
+ * transactional and non-transactional operations are never coalesced into one server operate.
  *
  * A utility class for reducing hot key contention in Aerospike operations by intelligently
  * batching operations for frequently accessed keys.
@@ -97,6 +99,47 @@ public class HotKeyReducer {
         @Override
         public String toString() {
             return this.map.toString();
+        }
+    }
+
+    /**
+     * Identifies an in-memory batch by Aerospike key and transaction context. Operations with
+     * different {@code Txn} references (or {@code null} vs non-null) never share a batch.
+     */
+    private static final class BatchKey {
+        private final Key key;
+        private final Txn txn;
+
+        private BatchKey(Key key, Txn txn) {
+            this.key = key;
+            this.txn = txn;
+        }
+
+        static BatchKey of(Key key, WritePolicy writePolicy) {
+            return new BatchKey(key, writePolicy.txn);
+        }
+
+        Key getKey() {
+            return key;
+        }
+
+        @Override
+        public boolean equals(Object obj) {
+            if (this == obj) {
+                return true;
+            }
+            if (!(obj instanceof BatchKey)) {
+                return false;
+            }
+            BatchKey other = (BatchKey) obj;
+            return key.equals(other.key) && txn == other.txn;
+        }
+
+        @Override
+        public int hashCode() {
+            int result = key.hashCode();
+            result = 31 * result + System.identityHashCode(txn);
+            return result;
         }
     }
 
@@ -268,9 +311,9 @@ public class HotKeyReducer {
     }
     
     /**
-     * Contains all operations for a single key within a batching time window.
-     * 
-     * <p>An OperationBatch aggregates multiple operate calls for the same key that occur
+     * Contains all operations for a single key and transaction within a batching time window.
+     *
+     * <p>An OperationBatch aggregates multiple operate calls for the same {@link BatchKey} that occur
      * within the configured delay time window. For example, if 5 calls to HotKeyReducer.submit
      * occur for the same key, each containing 2 operations, the structure will be:</p>
      * <ul>
@@ -569,7 +612,7 @@ public class HotKeyReducer {
     // Main class
     //
     // --------------------------------
-    private final Map<Key, OperationBatch> operationMap = new ConcurrentHashMap<>();
+    private final Map<BatchKey, OperationBatch> operationMap = new ConcurrentHashMap<>();
     private final IAerospikeClient client;
     private final long delayTimeMs;
     private final int delayTimeNs;
@@ -627,20 +670,21 @@ public class HotKeyReducer {
     }
     
     /**
-     * Adds operations for a key to the batching system.
-     * 
-     * @param key the Aerospike key
+     * Adds operations to the batching system for a {@link BatchKey}.
+     *
+     * @param key the Aerospike batch key
      * @param future the future to complete with results
      * @param operations the operations to batch
-     * @return true if this is the first operation for the key (indicating delay should occur)
+     * @return true if this is the first operation for the batch key (indicating delay should occur)
      * @throws InterruptedException if the thread is interrupted
      */
-    private synchronized boolean addOpsForKey(WritePolicy writePolicy, Key key, CompletableFuture<Record> future, Operation ... operations) throws InterruptedException {
-        OperationBatch ops = operationMap.get(key);
+    private synchronized boolean addOpsForBatch(WritePolicy writePolicy, BatchKey batchKey,
+            CompletableFuture<Record> future, Operation ... operations) throws InterruptedException {
+        OperationBatch ops = operationMap.get(batchKey);
         boolean shouldDelay = false;
         if (ops == null) {
             ops = new OperationBatch(writePolicy);
-            operationMap.put(key, ops);
+            operationMap.put(batchKey, ops);
             shouldDelay = true;
         }
         else {
@@ -654,15 +698,14 @@ public class HotKeyReducer {
         ops.submitOperationCall(future, operations);
         return shouldDelay;
     }
-    
+
     /**
      * Retrieves and removes the operation batch for a key.
      * 
      * @param key the Aerospike key
      * @return the OperationBatch for the key, or null if not found
-     */
-    private synchronized OperationBatch getBatchAndRemoveFromMap(Key key) {
-        return operationMap.remove(key);
+     */    private synchronized OperationBatch getBatchAndRemoveFromMap(BatchKey batchKey) {
+        return operationMap.remove(batchKey);
     }
 
     /**
@@ -672,30 +715,24 @@ public class HotKeyReducer {
      * <p>This is the synchronous version of the submit method. It blocks until the
      * operation completes and returns the result directly.</p>
      * 
-     * <p><b>Note:</b> If there are hot keys being reduced then the write policy to be used
-     * will be the used for all batched operations. The ramification of this is:</p>
-     * <ul>
-     * <li>Different timeout settings will fall back to that write policy<li>
-     * <li>Items cannot be in different transactions</li>
-     * <li>Filter expressions should be the same for all operations. </li>
-     * <ul>
-     * If different filter expressions are used for records in the same operation, an exception
-     * is thrown as this cannot be supported. However, filter expressions can be converted
-     * into read or write operaions with a condition. 
-     * <p/>
-     * For example:
+     * <p><b>Note:</b> Hot-key detection is per {@code Key}, but in-memory batches are partitioned by
+     * {@code (Key, Txn)}. Operations with different transaction contexts (including {@code null}
+     * vs non-null {@code wp.txn}) coalesce independently. Within a batch, the first submitter's
+     * {@link WritePolicy} is used for the server operate (timeouts, etc.). All operations in a
+     * batch must share the same {@code filterExp}; mismatches throw {@link AerospikeException}.</p>
+     * <p>Filter expressions can be converted into read or write operations with a condition.
+     * For example:</p>
      * <pre>
      * WritePolicy wp = client.copyWritePolicyDefault();
      * wp.filterExp = Exp.build(Exp.eq(Exp.stringBin("name"), Exp.val("Bob")));
      * Record rec = reducer.submit(wp, key, Operation.put(new Bin("name", "Tim")));
      * </pre>
-     * 
-     * This basically says "if the 'name' bin is 'Bob', set the 'name' bin to 'Tim'. But
-     * if there is a concurrent operation on the same key with either no filter or a
-     * different filter, an exception will be thrown. 
-     * 
-     * The solution is to turn this into a write expression which does the same thing.
-     * In this case it would be:
+     *
+     * <p>This says "if the 'name' bin is 'Bob', set the 'name' bin to 'Tim'. But if there is a
+     * concurrent operation on the same key with either no filter or a different filter, an
+     * exception will be thrown.</p>
+     *
+     * <p>The solution is to turn this into a write expression which does the same thing:</p>
      * <pre>
      * WritePolicy wp = client.copyWritePolicyDefault();
      * wp.filterExp = null;
@@ -704,12 +741,6 @@ public class HotKeyReducer {
      * Record rec = reducer.submit(wp, key, ExpOperation.write("name", exp, ExpWriteFlags.EVAL_NO_FAIL));
      * </pre>
      *
-     * The write operation here encompasses both the filter expression and setting the bin 
-     * to the new value. The {@code ExpOperation.write()} is used to modify the bin, and
-     * {@code EVAL_NO_FAIL} is used to make sure an exception is not thrown if the the
-     * "filter" part of the expression returns false. It will fail silently, just like
-     * using a filter expression
-     * 
      * @param wp the write policy to use (null for default policy)
      * @param key the Aerospike key to operate on
      * @param ops the operations to perform
@@ -741,17 +772,15 @@ public class HotKeyReducer {
      * 
      * <p>When batching occurs:</p>
      * <ul>
-     *   <li>The first operation for a hot key triggers a delay</li>
-     *   <li>Additional operations for the same key are added to the batch</li>
+     *   <li>The first operation for a hot {@code (Key, Txn)} triggers a delay</li>
+     *   <li>Additional operations for the same batch key are added to the batch</li>
      *   <li>After the delay, all operations execute as a single Aerospike operate call</li>
      *   <li>Results are distributed back to individual CompletableFutures</li>
      * </ul>
-     * 
      * <p><b>Note:</b> If there are hot keys being reduced then the write policy to be used
      * will be the used for all batched operations. The ramification of this is:</p>
      * <ul>
      * <li>Different timeout settings will fall back to that write policy<li>
-     * <li>Items cannot be in different transactions</li>
      * <li>Filter expressions should be the same for all operations. </li>
      * <ul>
      * If different filter expressions are used for records in the same operation, an exception
@@ -778,13 +807,14 @@ public class HotKeyReducer {
      *                      Exp.val("Tim"), Exp.unknown()));
      * Record rec = reducer.submit(wp, key, ExpOperation.write("name", exp, ExpWriteFlags.EVAL_NO_FAIL));
      * </pre>
+
      *
-     * The write operation here encompasses both the filter expression and setting the bin 
-     * to the new value. The {@code ExpOperation.write()} is used to modify the bin, and
-     * {@code EVAL_NO_FAIL} is used to make sure an exception is not thrown if the the
-     * "filter" part of the expression returns false. It will fail silently, just like
-     * using a filter expression
-     * 
+     * <p><b>Note:</b> Hot-key detection is per {@code Key}, but in-memory batches are partitioned by
+     * {@code (Key, Txn)}. Operations with different transaction contexts (including {@code null}
+     * vs non-null {@code wp.txn}) coalesce independently. Within a batch, the first submitter's
+     * {@link WritePolicy} is used for the server operate. All operations in a batch must share
+     * the same {@code filterExp}; mismatches throw {@link AerospikeException}.</p>
+     *
      * @param wp the write policy to use (null for default policy)
      * @param key the Aerospike key to operate on
      * @param ops the operations to perform
@@ -797,15 +827,18 @@ public class HotKeyReducer {
             if (wp == null) {
                 wp = client.copyWritePolicyDefault();
             }
+            BatchKey batchKey = BatchKey.of(key, wp);
             if (!monitor.useReducer(key)) {
                 myResults.complete(client.operate(wp, key, ops));
             }
-            else if (addOpsForKey(wp, key, myResults, ops)) {
+            else if (addOpsForBatch(wp, batchKey, myResults, ops)) {
                 Thread.sleep(delayTimeMs, delayTimeNs);
-                operationBatch = getBatchAndRemoveFromMap(key);
-                wp.respondAllOps = true;
-                
-                Record results = client.operate(wp, key, operationBatch.getOperations());
+                operationBatch = getBatchAndRemoveFromMap(batchKey);
+                WritePolicy batchWritePolicy = operationBatch.getWritePolicy();
+                batchWritePolicy.respondAllOps = true;
+
+                Record results = client.operate(batchWritePolicy, batchKey.getKey(),
+                        operationBatch.getOperations());
                 // If there is only one set of operations, just return it.
                 if (operationBatch.isSingleOperation()) {
                     myResults.complete(results);

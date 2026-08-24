@@ -242,15 +242,17 @@ public class Leaderboard implements UseCase {
      *       literal {@code signedInt} tokens, not expressions) - this composition is genuinely not
      *       part of the AEL language yet, not just unsupported on this SDK build. Matches Tim's own
      *       comment that "AEL cannot do nested expressions in selectors."</li>
-     *   <li>Independently, even a single-selector CDT read - the {@code index =
-     *       MapExp.getByKey(INDEX, ...)} half Tim said should work - fails here too: the same class
-     *       of read (a list-index selector, {@code $.acc.[0]}, in three forms including
-     *       {@code .get(return: INDEX)} lifted verbatim from a passing upstream test in that same
-     *       canonical grammar repo) throws an identical server-side "Parameter error" when tried in
-     *       {@code AdvancedExpressions} (see the comment there). Since syntax copied from a passing
-     *       upstream test still fails, this looks like a genuine gap/bug in this alpha SDK build's
-     *       AEL-to-CDT-selector translation, not a syntax guess away - worth flagging to the SDK
-     *       team directly rather than continuing to guess.</li>
+     *   <li>Independently, even the single-selector {@code index = MapExp.getByKey(INDEX, ...)}
+     *       half Tim said should work fails too - tried directly against a live cluster as {@code
+     *       $.score.&lt;mapKey&gt;.get(return: INDEX)} (both a bare-identifier and a quoted-string
+     *       form of the literal map key), the same shape used successfully for {@code
+     *       $.listBin1.[0].get(return: INDEX)} in the canonical grammar's own passing test - both
+     *       forms throw the identical server-side "Parameter error" here. The analogous list-index
+     *       read ({@code $.acc.[0]}, also lifted verbatim from that same upstream test - see
+     *       {@code AdvancedExpressions}'s comment) fails identically too. Since syntax copied from a
+     *       passing upstream test still fails on two different CDT types, this looks like a genuine
+     *       gap/bug in this alpha SDK build's AEL-to-CDT-selector translation, not a syntax guess
+     *       away - worth flagging to the SDK team directly rather than continuing to guess.</li>
      * </ol>
      * Net effect: even the "should work" half of this method can't currently be done in AEL on
      * this build, so the whole thing stays on the already-proven Exp builder form.

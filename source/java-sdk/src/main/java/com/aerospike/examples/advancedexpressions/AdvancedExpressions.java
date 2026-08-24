@@ -110,12 +110,17 @@ public class AdvancedExpressions implements UseCase {
 
         // The "acc" list-append is written as AEL (verified against a live cluster to behave
         // identically to ListExp.append) - per Tim's review comment to prefer AEL where possible.
-        // The "counter" read-back is NOT converted: every AEL index-read syntax tried against a live
-        // cluster ($.acc.getByIndex(0), $.acc[0], $.acc.{0}, $.acc.{0}.getValue()) threw the same
-        // server-side "Parameter error" that blocked Leaderboard's map-index read (see that class's
-        // getScoresAroundPlayer javadoc) - single-element list/map index reads via AEL appear to be
-        // an unsupported composition on this build, not just a syntax guess away. Kept on the
-        // proven ListExp.getByIndex Exp form; worth revisiting with correct syntax from Tim.
+        // The "counter" read-back is NOT converted: tried the grammar-correct dot-bracket list-index
+        // selector in three forms - bare $.acc.[0], $.acc.[0].get(return: VALUE), and $.acc.[0].get
+        // (return: INDEX) - all three lifted directly from the canonical, tested grammar at
+        // https://github.com/aerospike/aerospike-expression-lang-java (ListExpressionsTests.java,
+        // e.g. "$.listBin1.[0].get(return: INDEX) == 1"). All three throw the identical server-side
+        // "Parameter error" against this alpha SDK build's bundled AEL implementation (a separate,
+        // internal implementation under com.aerospike.client.sdk.ael, not this library). Since
+        // syntax lifted verbatim from a passing upstream test still fails here, this is a genuine
+        // gap/bug in this SDK build's CDT list-selector support, not a syntax guess - worth flagging
+        // to the SDK team directly rather than continuing to guess at syntax. Kept on the proven
+        // ListExp.getByIndex Exp form.
         TypedKey<Car> key = cars.id(1);
         session.upsert(key)
                 .bin("acc").listCreate(ListOrder.UNORDERED)
@@ -126,22 +131,21 @@ public class AdvancedExpressions implements UseCase {
     }
 
     /**
-     * Kept as {@code ListExp.getByValue(EXISTS, ...)} rather than an AEL string per Tim's review
-     * comment: tried two AEL translations of "value exists in a list bin" against a live cluster
-     * ({@code $.features.contains('Sunroof')} - server-side {@code Parameter error}; {@code
-     * $.features.{='Sunroof'}.count() > 0} - parses fine but silently returns 0 matches instead of
-     * the correct 10) and neither is safe to ship without an authoritative AEL grammar reference
-     * for list-membership/selector syntax. Worth revisiting with the correct syntax from Tim.
+     * AEL translation of {@code ListExp.getByValue(EXISTS, ...)}, using the language's {@code
+     * value in $.bin} membership operator - verified against a live cluster (full, unsampled diff
+     * of matching ids against the Exp version, not just a count) to return an identical result set.
+     * The earlier {@code .contains(...)}/{@code .{=...}.count()} guesses were wrong syntax, not a
+     * real capability gap - the correct grammar (confirmed against
+     * https://github.com/aerospike/aerospike-expression-lang-java) uses the {@code in} keyword.
      */
     private void findCarsWithFeature(Session session, String feature) {
-        Exp exp = ListExp.getByValue(ListReturnType.EXISTS, Exp.val(feature), Exp.listBin("features"));
-        showCarsMatchingExpression(session, exp, 10);
+        showCarsMatchingExpression(session, "'" + feature + "' in $.features", 10);
     }
 
-    /** Same rationale as {@link #findCarsWithFeature} - kept as Exp, not converted to AEL. */
+    /** Same {@code in} operator, reversed direction ({@code $.color in [...]}) - same verification. */
     private void findCarsWithColors(Session session, List<String> colors) {
-        Exp exp = ListExp.getByValue(ListReturnType.EXISTS, Exp.stringBin("color"), Exp.val(colors));
-        showCarsMatchingExpression(session, exp, 10);
+        String colorList = colors.stream().map(c -> "\"" + c + "\"").collect(java.util.stream.Collectors.joining(", "));
+        showCarsMatchingExpression(session, "$.color in [" + colorList + "]", 10);
     }
 
     /**
@@ -187,9 +191,9 @@ public class AdvancedExpressions implements UseCase {
         showCar(1, session.query(key).execute().getFirstRecord());
     }
 
-    private void showCarsMatchingExpression(Session session, Exp exp, int limit) {
+    private void showCarsMatchingExpression(Session session, String ael, int limit) {
         AtomicInteger count = new AtomicInteger();
-        try (TypedRecordStream<Car> stream = session.query(cars).where(exp).limit(limit).execute()) {
+        try (TypedRecordStream<Car> stream = session.query(cars).where(ael).limit(limit).execute()) {
             stream.forEach(result -> {
                 if (result.isOk()) {
                     showCar(count.incrementAndGet(), result.recordOrThrow());

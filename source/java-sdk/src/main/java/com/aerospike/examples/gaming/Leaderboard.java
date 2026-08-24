@@ -231,16 +231,29 @@ public class Leaderboard implements UseCase {
      * from neighboring buckets if the range overflows the current bucket.
      * <p/>
      * Kept as nested {@code Exp.let}/{@code Exp.def}/{@code Exp.cond} builder calls rather than an
-     * AEL string (unlike {@code AdvancedExpressions}) - per Tim Faulkes' PR review, the {@code
-     * index}/{@code startIndex}/{@code count} computation genuinely could be done in AEL (e.g.
-     * {@code index = $.score.{@mapKey}.getIndexes()} - the {@code INT} return type is implicit in
-     * {@code getIndexes()}, so the earlier draft's assumption that this composition needed an
-     * explicit value-type hint was simply wrong). The real, current AEL limitation is that
-     * selectors can't take nested/computed expressions - the final range read would need something
-     * like {@code $.score.{(${startIndex}):(${startIndex} + ${count})}.getKeys()}, and AEL can't
-     * evaluate a variable inside a selector yet. Since the whole point of this method is that
-     * range read, there's no way to do it end-to-end in AEL today - staying on the Exp builder form
-     * is correct here, not a gap to close later.
+     * AEL string (unlike {@code AdvancedExpressions}), for two independent reasons found while
+     * investigating Tim Faulkes' PR review comment on this method:
+     * <ol>
+     *   <li>The final range read (getting a clamped window of keys either side of {@code index})
+     *       needs computed bounds inside a selector, e.g. {@code $.score.{(${startIndex}):
+     *       (${startIndex} + ${count})}.getKeys()}. Checked against the canonical grammar at
+     *       {@code https://github.com/aerospike/aerospike-expression-lang-java}
+     *       ({@code indexRangeIdentifier: start ':' end}, where {@code start}/{@code end} are
+     *       literal {@code signedInt} tokens, not expressions) - this composition is genuinely not
+     *       part of the AEL language yet, not just unsupported on this SDK build. Matches Tim's own
+     *       comment that "AEL cannot do nested expressions in selectors."</li>
+     *   <li>Independently, even a single-selector CDT read - the {@code index =
+     *       MapExp.getByKey(INDEX, ...)} half Tim said should work - fails here too: the same class
+     *       of read (a list-index selector, {@code $.acc.[0]}, in three forms including
+     *       {@code .get(return: INDEX)} lifted verbatim from a passing upstream test in that same
+     *       canonical grammar repo) throws an identical server-side "Parameter error" when tried in
+     *       {@code AdvancedExpressions} (see the comment there). Since syntax copied from a passing
+     *       upstream test still fails, this looks like a genuine gap/bug in this alpha SDK build's
+     *       AEL-to-CDT-selector translation, not a syntax guess away - worth flagging to the SDK
+     *       team directly rather than continuing to guess.</li>
+     * </ol>
+     * Net effect: even the "should work" half of this method can't currently be done in AEL on
+     * this build, so the whole thing stays on the already-proven Exp builder form.
      */
     public List<Player> getScoresAroundPlayer(Session session, int playerId, int score, int numPlayersEitherSide) {
         String mapKey = getMapKey(playerId, score);

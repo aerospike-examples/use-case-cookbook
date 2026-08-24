@@ -6,7 +6,6 @@ import java.util.Date;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
-import java.util.Optional;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
@@ -14,7 +13,6 @@ import java.util.concurrent.atomic.AtomicLong;
 import com.aerospike.client.sdk.DataSet;
 import com.aerospike.client.sdk.Key;
 import com.aerospike.client.sdk.Record;
-import com.aerospike.client.sdk.RecordResult;
 import com.aerospike.client.sdk.Session;
 import com.aerospike.client.sdk.cdt.MapOrder;
 import com.aerospike.examples.UseCase;
@@ -78,13 +76,11 @@ public class TimeSeriesDemo implements UseCase {
         return "https://github.com/aerospike-examples/use-case-cookbook/blob/main/UseCases/timeseries.md";
     }
 
-    private DataSet events() {
-        return DataSet.of(System.getProperty("demo.namespace", "test"), "uccb_events");
-    }
+    private final DataSet events = DataSet.of(System.getProperty("demo.namespace", "test"), "uccb_events");
 
     @Override
     public void setup(Session session) throws Exception {
-        session.truncate(events());
+        session.truncate(events);
         generateSampleData(session);
     }
 
@@ -102,7 +98,7 @@ public class TimeSeriesDemo implements UseCase {
     }
 
     private Key createEventKey(String accountId, long timestamp) {
-        return events().id(accountId + ":" + getBucketOffset(timestamp));
+        return events.id(accountId + ":" + getBucketOffset(timestamp));
     }
 
     private static long dateToLong(Date date) {
@@ -265,13 +261,13 @@ public class TimeSeriesDemo implements UseCase {
 
         if (direction == SortDirection.ASCENDING) {
             for (long recordKey = startRecord; results.size() < count && recordKey <= endRecord; recordKey++) {
-                Record record = readFilteredBucket(session, events().id(accountId + ":" + recordKey), earliestEventId, latestEventId);
+                Record record = readFilteredBucket(session, events.id(accountId + ":" + recordKey), earliestEventId, latestEventId);
                 addEventsToResults(count, record, results, direction, deviceFilter);
             }
         }
         else {
             for (long recordKey = endRecord; results.size() < count && recordKey >= startRecord; recordKey--) {
-                Record record = readFilteredBucket(session, events().id(accountId + ":" + recordKey), earliestEventId, latestEventId);
+                Record record = readFilteredBucket(session, events.id(accountId + ":" + recordKey), earliestEventId, latestEventId);
                 addEventsToResults(count, record, results, direction, deviceFilter);
             }
         }
@@ -297,7 +293,7 @@ public class TimeSeriesDemo implements UseCase {
 
         List<Key> keys = new ArrayList<>();
         for (long i = endRecord; i <= firstRecord; i++) {
-            keys.add(events().id(accountId + ":" + i));
+            keys.add(events.id(accountId + ":" + i));
         }
 
         AtomicLong totalEvents = new AtomicLong();
@@ -330,10 +326,9 @@ public class TimeSeriesDemo implements UseCase {
      * happens server-side here.
      */
     private Record readFilteredBucket(Session session, Key key, String earliestEventId, String latestEventId) {
-        Optional<RecordResult> result = session.query(key)
+        return session.query(key)
                 .bin(BIN_NAME).onMapKeyRange(earliestEventId, latestEventId).getKeysAndValues()
-                .execute().getFirst();
-        return result.isPresent() && result.get().isOk() ? result.get().recordOrThrow() : null;
+                .execute().getFirstRecord();
     }
 
     @SuppressWarnings("unchecked")

@@ -3,11 +3,9 @@ package com.aerospike.examples.onetomany;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
-import java.util.Optional;
 import java.util.concurrent.ThreadLocalRandom;
 
 import com.aerospike.client.sdk.Record;
-import com.aerospike.client.sdk.RecordResult;
 import com.aerospike.client.sdk.Session;
 import com.aerospike.client.sdk.TypedDataSet;
 import com.aerospike.client.sdk.TypedKey;
@@ -53,13 +51,10 @@ public class OneToManyRelationships implements UseCase {
         return "https://github.com/aerospike-examples/use-case-cookbook/blob/main/UseCases/one-to-many-relationships.md";
     }
 
-    private TypedDataSet<Agent> agents() {
-        return TypedDataSet.of(System.getProperty("demo.namespace", "test"), "uccb_agent", Agent.class);
-    }
-
-    private TypedDataSet<Listing> listings() {
-        return TypedDataSet.of(System.getProperty("demo.namespace", "test"), "uccb_listing", Listing.class);
-    }
+    private final TypedDataSet<Agent> agents =
+            TypedDataSet.of(System.getProperty("demo.namespace", "test"), "uccb_agent", Agent.class);
+    private final TypedDataSet<Listing> listings =
+            TypedDataSet.of(System.getProperty("demo.namespace", "test"), "uccb_listing", Listing.class);
 
     private Agent randomAgent(long agentId) {
         String first = FIRST_NAMES[ThreadLocalRandom.current().nextInt(FIRST_NAMES.length)];
@@ -89,10 +84,10 @@ public class OneToManyRelationships implements UseCase {
 
     private void addListingToAgent(Session session, String listingId, long agentId) {
         session.doInTransaction(tx -> {
-            tx.upsert(agents().id(agentId))
+            tx.upsert(agents.id(agentId))
                     .bin("listings").listAppend(listingId, opts -> opts.addUnique().allowFailures())
                     .execute();
-            tx.upsert(listings().id(listingId))
+            tx.upsert(listings.id(listingId))
                     .bin("agentId").setTo(agentId)
                     .execute();
         });
@@ -100,8 +95,6 @@ public class OneToManyRelationships implements UseCase {
 
     @Override
     public void setup(Session session) throws Exception {
-        TypedDataSet<Agent> agents = agents();
-        TypedDataSet<Listing> listings = listings();
         session.truncate(agents);
         session.truncate(listings);
 
@@ -129,10 +122,9 @@ public class OneToManyRelationships implements UseCase {
      */
     public void addListing(Session session, long agentId, Listing listing) {
         listing.setAgentId(agentId);
-        TypedDataSet<Listing> listings = listings();
         session.doInTransaction(tx -> {
             tx.upsert(listings).object(listing).execute();
-            tx.upsert(agents().id(agentId))
+            tx.upsert(agents.id(agentId))
                     .bin("listings").listAppend(listing.getId(), opts -> opts.addUnique().allowFailures())
                     .execute();
         });
@@ -143,19 +135,19 @@ public class OneToManyRelationships implements UseCase {
      * transaction. Returns {@code false} if the listing did not exist.
      */
     public boolean deleteListing(Session session, String listingId) {
-        TypedKey<Listing> listingKey = listings().id(listingId);
+        TypedKey<Listing> listingKey = listings.id(listingId);
         return session.doInTransactionReturning(tx -> {
-            Optional<RecordResult> existing = tx.query(listingKey).readingOnlyBins("agentId").execute().getFirst();
-            if (existing.isEmpty() || !existing.get().isOk()) {
+            Record existing = tx.query(listingKey).readingOnlyBins("agentId").execute().getFirstRecord();
+            if (existing == null) {
                 return false;
             }
-            long agentId = existing.get().recordOrThrow().getLong("agentId");
+            long agentId = existing.getLong("agentId");
             tx.delete(listingKey).execute();
 
-            RecordResult removeResult = tx.upsert(agents().id(agentId))
+            Record removeResult = tx.upsert(agents.id(agentId))
                     .bin("listings").onListValue(listingId).removeAnd().count()
-                    .execute().getFirst().orElseThrow();
-            return removeResult.recordOrThrow().getLong("listings") > 0;
+                    .execute().getFirstRecord();
+            return removeResult.getLong("listings") > 0;
         });
     }
 
@@ -164,14 +156,13 @@ public class OneToManyRelationships implements UseCase {
      * batch-reads every listing referenced by it.
      */
     public List<Listing> getListings(Session session, long agentId) {
-        TypedKey<Agent> agentKey = agents().id(agentId);
+        TypedKey<Agent> agentKey = agents.id(agentId);
 
         return session.doInTransactionReturning(tx -> {
-            Optional<RecordResult> agentResult = tx.query(agentKey).readingOnlyBins("listings").execute().getFirst();
-            if (agentResult.isEmpty() || !agentResult.get().isOk()) {
+            Record agentRecord = tx.query(agentKey).readingOnlyBins("listings").execute().getFirstRecord();
+            if (agentRecord == null) {
                 return List.<Listing>of();
             }
-            Record agentRecord = agentResult.get().recordOrThrow();
             List<?> listingIds = agentRecord.getList("listings");
             if (listingIds == null || listingIds.isEmpty()) {
                 return List.<Listing>of();
@@ -179,7 +170,7 @@ public class OneToManyRelationships implements UseCase {
 
             TypedKeyList<Listing> keys = new TypedKeyList<>();
             for (Object listingId : listingIds) {
-                keys.add(listings().id((String) listingId));
+                keys.add(listings.id((String) listingId));
             }
 
             List<Listing> results = new ArrayList<>();

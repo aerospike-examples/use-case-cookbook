@@ -292,14 +292,14 @@ public class HotKeyReducer {
         try {
             if (!monitor.useReducer(key)) {
                 myResults.complete(session.upsert(key).appendOperations(ops)
-                        .execute().getFirst().orElseThrow().recordOrThrow());
+                        .execute().getFirstRecord());
             }
             else if (addOpsForKey(key, myResults, ops)) {
                 Thread.sleep(delayTimeMs, delayTimeNs);
                 operationBatch = getBatchAndRemoveFromMap(key);
 
                 Record results = session.upsert(key).appendOperations(operationBatch.getOperations())
-                        .execute().getFirst().orElseThrow().recordOrThrow();
+                        .execute().getFirstRecord();
                 if (operationBatch.isSingleOperation()) {
                     myResults.complete(results);
                 }

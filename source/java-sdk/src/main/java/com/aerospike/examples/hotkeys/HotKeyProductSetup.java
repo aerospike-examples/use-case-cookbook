@@ -1,10 +1,10 @@
 package com.aerospike.examples.hotkeys;
 
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import com.aerospike.client.sdk.DataSet;
 import com.aerospike.client.sdk.Key;
-import com.aerospike.client.sdk.RecordResult;
 import com.aerospike.client.sdk.RecordStream;
 import com.aerospike.client.sdk.Session;
 import com.aerospike.examples.hotkeys.model.HotKeyProduct;
@@ -18,7 +18,7 @@ public final class HotKeyProductSetup {
     }
 
     public static void truncateAndSeed(Session session, int replicaCount) {
-        DataSet products = HotKeyKeys.products();
+        DataSet products = HotKeyKeys.PRODUCTS;
         session.truncate(products);
 
         long productId = HotKeySimulationParams.HOT_PRODUCT_ID;
@@ -48,15 +48,15 @@ public final class HotKeyProductSetup {
      */
     public static int readMergedUnitsSold(Session session, int replicaCount) {
         List<Key> keys = HotKeyKeys.allReplicaKeys(HotKeySimulationParams.HOT_PRODUCT_ID, replicaCount);
-        int total = 0;
+        AtomicInteger total = new AtomicInteger();
         try (RecordStream stream = session.query(keys).readingOnlyBins("unitsSold").execute()) {
-            for (RecordResult result : stream.stream().toList()) {
+            stream.forEach(result -> {
                 if (result.isOk()) {
-                    total += result.recordOrThrow().getInt("unitsSold");
+                    total.addAndGet(result.recordOrThrow().getInt("unitsSold"));
                 }
-            }
+            });
         }
-        return total;
+        return total.get();
     }
 
     /**

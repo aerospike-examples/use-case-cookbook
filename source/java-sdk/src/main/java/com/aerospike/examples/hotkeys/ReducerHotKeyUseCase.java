@@ -64,7 +64,7 @@ public class ReducerHotKeyUseCase implements UseCase {
 
         Key primaryKey = HotKeyKeys.primary(productId);
 
-        try (HotKeyPendingLimitScope ignored = HotKeyPendingLimitScope.apply(session, HotKeyKeys.products().getNamespace(),
+        try (HotKeyPendingLimitScope ignored = HotKeyPendingLimitScope.apply(session, HotKeyKeys.PRODUCTS.getNamespace(),
                 HotKeySimulationParams.TRANSACTION_PENDING_LIMIT)) {
             HotKeySimulationStats baseline = simulation.run("Baseline - direct operate on hot key",
                     numThreads, durationSecs,
@@ -80,7 +80,7 @@ public class ReducerHotKeyUseCase implements UseCase {
 
             System.out.println("HotKeyReducer statistics: " + reducer.getStatistics());
             System.out.printf("Primary record unitsSold after mitigation: %d%n",
-                    session.query(primaryKey).execute().getFirst().orElseThrow().recordOrThrow().getInt("unitsSold"));
+                    session.query(primaryKey).execute().getFirstRecord().getInt("unitsSold"));
             System.out.printf("Mitigation successes: %,d (baseline successes: %,d)%n",
                     mitigated.successes(), baseline.successes());
         }

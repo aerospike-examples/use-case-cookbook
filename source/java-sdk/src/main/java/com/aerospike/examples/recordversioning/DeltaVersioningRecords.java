@@ -7,13 +7,11 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ThreadLocalRandom;
 
 import com.aerospike.client.sdk.ChainableOperationBuilder;
 import com.aerospike.client.sdk.Record;
-import com.aerospike.client.sdk.RecordResult;
 import com.aerospike.client.sdk.Session;
 import com.aerospike.client.sdk.TypedDataSet;
 import com.aerospike.client.sdk.TypedKey;
@@ -68,21 +66,20 @@ public class DeltaVersioningRecords implements UseCase {
         return "https://github.com/aerospike-examples/use-case-cookbook/blob/main/UseCases/versioning-records-delta.md";
     }
 
-    private TypedDataSet<TradeBase> tradeBases() {
-        return TypedDataSet.of(System.getProperty("demo.namespace", "test"), "uccb_tradebase", TradeBase.class);
-    }
+    private final TypedDataSet<TradeBase> tradeBases =
+            TypedDataSet.of(System.getProperty("demo.namespace", "test"), "uccb_tradebase", TradeBase.class);
 
     private TypedKey<TradeBase> formKey(long id) {
-        return tradeBases().id(id);
+        return tradeBases.id(id);
     }
 
     private TypedKey<TradeBase> formKey(long id, int version) {
-        return tradeBases().id(id + ":" + version);
+        return tradeBases.id(id + ":" + version);
     }
 
     @Override
     public void setup(Session session) throws Exception {
-        session.truncate(tradeBases());
+        session.truncate(tradeBases);
 
         System.out.printf("Generating %,d trades%n", NUM_RECORDS);
         TradeBaseMapper mapper = new TradeBaseMapper();
@@ -158,16 +155,15 @@ public class DeltaVersioningRecords implements UseCase {
             Map<String, Object> newValues) {
         return session.doInTransactionReturning(tx -> {
             TypedKey<TradeBase> key = formKey(id);
-            Optional<RecordResult> existing = tx.query(key).execute().getFirst();
+            Record existing = tx.query(key).execute().getFirstRecord();
 
             Map<String, Object> before = new HashMap<>();
             int currentVersion = -1;
             Map<Long, Long> versions = null;
-            if (existing.isPresent() && existing.get().isOk()) {
-                Record rec = existing.get().recordOrThrow();
-                before.putAll(rec.bins);
-                currentVersion = rec.getInt("version");
-                versions = (Map<Long, Long>) rec.getMap("versions");
+            if (existing != null) {
+                before.putAll(existing.bins);
+                currentVersion = existing.getInt("version");
+                versions = (Map<Long, Long>) existing.getMap("versions");
             }
 
             long changeTs = timestamp == 0 ? System.currentTimeMillis() : timestamp;
@@ -221,13 +217,13 @@ public class DeltaVersioningRecords implements UseCase {
 
     /** Returns all delta records for a trade, from version 0 through its current live version. */
     public List<Record> getAuditTrail(Session session, long id) {
-        Record current = session.query(formKey(id)).execute().getFirst().orElseThrow().recordOrThrow();
+        Record current = session.query(formKey(id)).execute().getFirstRecord();
         int currentVersion = current.getInt("version");
         List<Record> trail = new ArrayList<>();
         for (int version = 0; version <= currentVersion; version++) {
-            Optional<RecordResult> result = session.query(formKey(id, version)).execute().getFirst();
-            if (result.isPresent() && result.get().isOk()) {
-                trail.add(result.get().recordOrThrow());
+            Record record = session.query(formKey(id, version)).execute().getFirstRecord();
+            if (record != null) {
+                trail.add(record);
             }
         }
         return trail;
@@ -238,11 +234,11 @@ public class DeltaVersioningRecords implements UseCase {
     public Map<String, Object> reconstructAtVersion(Session session, long id, int targetVersion) {
         Map<String, Object> reconstructed = new HashMap<>();
         for (int version = 0; version <= targetVersion; version++) {
-            Optional<RecordResult> result = session.query(formKey(id, version)).execute().getFirst();
-            if (result.isEmpty() || !result.get().isOk()) {
+            Record record = session.query(formKey(id, version)).execute().getFirstRecord();
+            if (record == null) {
                 throw new IllegalArgumentException("Missing delta record for version " + version);
             }
-            List<?> changes = result.get().recordOrThrow().getList("changes");
+            List<?> changes = record.getList("changes");
             if (changes == null) {
                 continue;
             }
@@ -282,7 +278,7 @@ public class DeltaVersioningRecords implements UseCase {
     public void run(Session session) throws Exception {
         final long tradeId = 2;
 
-        Record rec = session.query(formKey(tradeId)).execute().getFirst().orElseThrow().recordOrThrow();
+        Record rec = session.query(formKey(tradeId)).execute().getFirstRecord();
         int currentTradeVersion = rec.getInt("tradeVersion");
         updateTradeBaseWithDelta(session, tradeId, 0, "Increment trade version", "batch-user",
                 Map.of("tradeVersion", (long) (currentTradeVersion + 1)));
@@ -296,10 +292,10 @@ public class DeltaVersioningRecords implements UseCase {
         printAuditTrail(session, tradeId);
 
         System.out.println("\nVersion map:");
-        Optional<RecordResult> versionsResult = session.query(formKey(tradeId)).readingOnlyBins("versions").execute().getFirst();
-        System.out.println(versionsResult.map(r -> r.recordOrThrow().getMap("versions")).orElse(null));
+        Record versionsRecord = session.query(formKey(tradeId)).readingOnlyBins("versions").execute().getFirstRecord();
+        System.out.println(versionsRecord == null ? null : versionsRecord.getMap("versions"));
 
-        Record current = session.query(formKey(tradeId)).execute().getFirst().orElseThrow().recordOrThrow();
+        Record current = session.query(formKey(tradeId)).execute().getFirstRecord();
         int version = current.getInt("version");
         System.out.printf("%nReconstructed at version %d:%n", version);
         System.out.println(reconstructAtVersion(session, tradeId, version));

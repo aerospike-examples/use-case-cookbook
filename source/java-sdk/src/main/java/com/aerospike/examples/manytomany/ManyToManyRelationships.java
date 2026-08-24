@@ -6,12 +6,12 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
-import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
+import com.aerospike.client.sdk.Record;
 import com.aerospike.client.sdk.RecordResult;
 import com.aerospike.client.sdk.RecordStream;
 import com.aerospike.client.sdk.Session;
@@ -58,13 +58,10 @@ public class ManyToManyRelationships implements UseCase {
         return "https://github.com/aerospike-examples/use-case-cookbook/blob/main/UseCases/many-to-many-relationships.md";
     }
 
-    private TypedDataSet<Account> accounts() {
-        return TypedDataSet.of(System.getProperty("demo.namespace", "test"), "uccb_account", Account.class);
-    }
-
-    private TypedDataSet<Customer> customers() {
-        return TypedDataSet.of(System.getProperty("demo.namespace", "test"), "uccb_customer", Customer.class);
-    }
+    private final TypedDataSet<Account> accounts =
+            TypedDataSet.of(System.getProperty("demo.namespace", "test"), "uccb_account", Account.class);
+    private final TypedDataSet<Customer> customers =
+            TypedDataSet.of(System.getProperty("demo.namespace", "test"), "uccb_customer", Customer.class);
 
     private Customer randomCustomer(String custId) {
         String first = FIRST_NAMES[ThreadLocalRandom.current().nextInt(FIRST_NAMES.length)];
@@ -89,11 +86,11 @@ public class ManyToManyRelationships implements UseCase {
      */
     public boolean addAccount(Session session, Account account, List<String> ownerIds) {
         return session.doInTransactionReturning(tx -> {
-            tx.upsert(accounts()).object(account).execute();
-            tx.upsert(accounts().id(account.getId())).bin("owners").setTo(ownerIds).execute();
+            tx.upsert(accounts).object(account).execute();
+            tx.upsert(accounts.id(account.getId())).bin("owners").setTo(ownerIds).execute();
 
             TypedKeyList<Customer> customerKeys = new TypedKeyList<>();
-            ownerIds.forEach(id -> customerKeys.add(customers().id(id)));
+            ownerIds.forEach(id -> customerKeys.add(customers.id(id)));
             try (RecordStream stream = tx.upsert(customerKeys)
                     .bin("accounts").listAppend(account.getId(), opts -> opts.addUnique().allowFailures())
                     .execute()) {
@@ -104,8 +101,6 @@ public class ManyToManyRelationships implements UseCase {
 
     @Override
     public void setup(Session session) throws Exception {
-        TypedDataSet<Account> accounts = accounts();
-        TypedDataSet<Customer> customers = customers();
         session.truncate(accounts);
         session.truncate(customers);
 
@@ -133,19 +128,19 @@ public class ManyToManyRelationships implements UseCase {
      * to shared-account count.
      */
     public Map<String, Integer> getRelatedCustomers(Session session, String customerId) {
-        Optional<RecordResult> customerResult = session.query(customers().id(customerId))
-                .readingOnlyBins("accounts").execute().getFirst();
-        if (customerResult.isEmpty() || !customerResult.get().isOk()) {
+        Record customerRecord = session.query(customers.id(customerId))
+                .readingOnlyBins("accounts").execute().getFirstRecord();
+        if (customerRecord == null) {
             return Map.of();
         }
-        List<?> accountIds = customerResult.get().recordOrThrow().getList("accounts");
+        List<?> accountIds = customerRecord.getList("accounts");
         if (accountIds == null || accountIds.isEmpty()) {
             return Map.of();
         }
 
         TypedKeyList<Account> accountKeys = new TypedKeyList<>();
         for (Object accountId : accountIds) {
-            accountKeys.add(accounts().id((String) accountId));
+            accountKeys.add(accounts.id((String) accountId));
         }
 
         Map<String, Integer> counts = new HashMap<>();
@@ -172,11 +167,11 @@ public class ManyToManyRelationships implements UseCase {
      * not exist.
      */
     public List<String> getRelatedAccountIds(Session session, String customerId) {
-        Optional<RecordResult> customerResult = session.query(customers().id(customerId)).execute().getFirst();
-        if (customerResult.isEmpty() || !customerResult.get().isOk()) {
+        Record customerRecord = session.query(customers.id(customerId)).execute().getFirstRecord();
+        if (customerRecord == null) {
             return null;
         }
-        List<?> accountIds = customerResult.get().recordOrThrow().getList("accounts");
+        List<?> accountIds = customerRecord.getList("accounts");
         return accountIds == null ? null : accountIds.stream().map(id -> (String) id).collect(Collectors.toList());
     }
 
@@ -187,20 +182,20 @@ public class ManyToManyRelationships implements UseCase {
      */
     public void removeAssociation(Session session, String customerId, String accountId) {
         session.doInTransaction(tx -> {
-            RecordResult customerRemove = tx.upsert(customers().id(customerId))
+            Record customerRemove = tx.upsert(customers.id(customerId))
                     .bin("accounts").onListValue(accountId).removeAnd().count()
-                    .execute().getFirst().orElseThrow();
-            boolean removedFromCustomer = customerRemove.recordOrThrow().getLong("accounts") > 0;
+                    .execute().getFirstRecord();
+            boolean removedFromCustomer = customerRemove.getLong("accounts") > 0;
             if (!removedFromCustomer) {
                 throw new IllegalStateException(String.format(
                         "Customer record for key '%s', should contain account id '%s' in its accounts list, but does not",
                         customerId, accountId));
             }
 
-            RecordResult accountRemove = tx.upsert(accounts().id(accountId))
+            Record accountRemove = tx.upsert(accounts.id(accountId))
                     .bin("owners").onListValue(customerId).removeAnd().count()
-                    .execute().getFirst().orElseThrow();
-            boolean removedFromAccount = accountRemove.recordOrThrow().getLong("owners") > 0;
+                    .execute().getFirstRecord();
+            boolean removedFromAccount = accountRemove.getLong("owners") > 0;
             if (!removedFromAccount) {
                 throw new IllegalStateException(String.format(
                         "Account record for key '%s', should contain customer id '%s' in its owners list, but does not",

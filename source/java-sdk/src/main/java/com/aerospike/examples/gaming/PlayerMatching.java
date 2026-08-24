@@ -14,12 +14,10 @@ import com.aerospike.client.sdk.ChainableOperationBuilder;
 import com.aerospike.client.sdk.DataSet;
 import com.aerospike.client.sdk.Record;
 import com.aerospike.client.sdk.RecordResult;
-import com.aerospike.client.sdk.ResultCode;
 import com.aerospike.client.sdk.Session;
 import com.aerospike.client.sdk.TypedDataSet;
 import com.aerospike.client.sdk.TypedKey;
 import com.aerospike.client.sdk.TypedKeyList;
-import com.aerospike.client.sdk.exp.Exp;
 import com.aerospike.examples.Async;
 import com.aerospike.examples.UseCase;
 import com.aerospike.examples.gaming.model.Player;
@@ -70,13 +68,9 @@ public class PlayerMatching implements UseCase {
                 + "their opponents 80% of the time. If a player with a shield attacks during a shield, the shield is removed.";
     }
 
-    private TypedDataSet<Player> players() {
-        return TypedDataSet.of(System.getProperty("demo.namespace", "test"), "uccb_player", Player.class);
-    }
-
-    private DataSet scoreboard() {
-        return DataSet.of(System.getProperty("demo.namespace", "test"), "scoreboard");
-    }
+    private final TypedDataSet<Player> players =
+            TypedDataSet.of(System.getProperty("demo.namespace", "test"), "uccb_player", Player.class);
+    private final DataSet scoreboard = DataSet.of(System.getProperty("demo.namespace", "test"), "scoreboard");
 
     private Player randomPlayer(int id) {
         String first = FIRST_NAMES[ThreadLocalRandom.current().nextInt(FIRST_NAMES.length)];
@@ -89,9 +83,8 @@ public class PlayerMatching implements UseCase {
 
     @Override
     public void setup(Session session) throws Exception {
-        TypedDataSet<Player> players = players();
         session.truncate(players);
-        session.truncate(scoreboard());
+        session.truncate(scoreboard);
 
         System.out.printf("Generating %,d Players%n", NUM_PLAYERS);
         for (int id = 1; id <= NUM_PLAYERS; id++) {
@@ -149,7 +142,7 @@ public class PlayerMatching implements UseCase {
      * fails because the candidate stopped being eligible in the meantime.
      */
     public Optional<Player> findPlayerToAttack(Session session, int attackerId, TypedKeyList<Player> possibilities) {
-        Exp filter = getPlayerFilter();
+        String filter = getPlayerFilter();
         List<Record> validRecords = new ArrayList<>();
         try (var stream = session.query(possibilities).where(filter).execute()) {
             stream.forEach(result -> {
@@ -159,6 +152,7 @@ public class PlayerMatching implements UseCase {
             });
         }
 
+        var mapper = session.getRecordMappingFactory().getMapper(Player.class);
         while (!validRecords.isEmpty()) {
             int recordNum = ThreadLocalRandom.current().nextInt(validRecords.size());
             int id = validRecords.get(recordNum).getInt("id");
@@ -166,7 +160,7 @@ public class PlayerMatching implements UseCase {
             // requesting both a write and a read of the same bin in one operation returns a
             // multi-result wrapper for that bin instead of a plain value, so we just set it
             // directly on the Player below from the value we already know we wrote.
-            Optional<RecordResult> result = session.upsert(getPlayerKey(id))
+            Optional<Player> player = session.upsert(getPlayerKey(id))
                     .where(filter)
                     .bin("beingAttackedBy").setTo("Player " + id)
                     .bin("id").get()
@@ -177,15 +171,14 @@ public class PlayerMatching implements UseCase {
                     .bin("shieldExpiry").get()
                     .bin("online").get()
                     .bin("score").get()
-                    .execute().getFirst();
+                    .execute().getFirst(mapper);
 
-            if (result.isEmpty() || !result.get().isOk()) {
+            if (player.isEmpty()) {
                 validRecords.remove(recordNum);
             }
             else {
-                Player player = recordToPlayer(result.get().recordOrThrow());
-                player.setBeingAttackedBy("Player " + id);
-                return Optional.of(player);
+                player.get().setBeingAttackedBy("Player " + id);
+                return player;
             }
         }
         return Optional.empty();
@@ -264,33 +257,22 @@ public class PlayerMatching implements UseCase {
         });
     }
 
-    private Exp getPlayerFilter() {
-        return Exp.and(
-                Exp.not(Exp.boolBin("online")),
-                Exp.lt(Exp.intBin("shieldExpiry"), Exp.val(new Date().getTime())),
-                Exp.or(Exp.eq(Exp.val(""), Exp.stringBin("beingAttackedBy")), Exp.not(Exp.binExists("beingAttackedBy"))),
-                Exp.gt(Exp.intBin("score"), Exp.val(400)));
+    /**
+     * AEL translation of the legacy filter, verified against a live cluster to return identical
+     * candidate counts to the original {@code Exp} form. One deliberate simplification: the
+     * original also treated a missing {@code beingAttackedBy} bin as eligible ({@code Exp.or(...,
+     * Exp.not(Exp.binExists(...)))}) - that fallback is unreachable in this use case's data model
+     * (every {@code Player} always has the bin, set at creation) and AEL's bin-existence syntax
+     * couldn't be verified against real missing-bin data here, so it's dropped rather than guessed.
+     */
+    private String getPlayerFilter() {
+        return String.format(
+                "$.online == false and $.shieldExpiry < %d and $.beingAttackedBy == '' and $.score > 400",
+                new Date().getTime());
     }
 
     public TypedKey<Player> getPlayerKey(int id) {
-        return players().id(id);
-    }
-
-    public Player recordToPlayer(Record record) {
-        if (record == null) {
-            return null;
-        }
-        Player result = new Player();
-        result.setBeingAttackedBy(record.getString("beingAttackedBy"));
-        result.setEmail(record.getString("email"));
-        result.setFirstName(record.getString("firstName"));
-        result.setId(record.getInt("id"));
-        result.setLastName(record.getString("lastName"));
-        result.setOnline(record.getBoolean("online"));
-        result.setScore(record.getInt("score"));
-        result.setShieldExpiry(record.getLong("shieldExpiry"));
-        result.setUserName(record.getString("userName"));
-        return result;
+        return players.id(id);
     }
 
     /**
@@ -298,13 +280,13 @@ public class PlayerMatching implements UseCase {
      * and the player was already online.
      */
     public Player setPlayerOnline(Session session, int playerId, boolean isOnline) {
-        ChainableOperationBuilder builder = session.upsert(getPlayerKey(playerId));
-        if (isOnline) {
-            builder = builder.where(Exp.not(Exp.boolBin("online")));
-        }
+        // A where clause of "" applies no filter, so the isOnline/not-isOnline cases don't need
+        // separate builder-reassignment branches.
+        var mapper = session.getRecordMappingFactory().getMapper(Player.class);
         // "online" is set above but deliberately not also read back below - see the equivalent
         // note in findPlayerToAttack.
-        Optional<RecordResult> result = builder
+        Optional<Player> player = session.upsert(getPlayerKey(playerId))
+                .where(isOnline ? "$.online == false" : "")
                 .bin("online").setTo(isOnline)
                 .bin("id").get()
                 .bin("userName").get()
@@ -314,13 +296,12 @@ public class PlayerMatching implements UseCase {
                 .bin("shieldExpiry").get()
                 .bin("beingAttackedBy").get()
                 .bin("score").get()
-                .execute().getFirst();
-        if (result.isEmpty() || !result.get().isOk()) {
+                .execute().getFirst(mapper);
+        if (player.isEmpty()) {
             return null;
         }
-        Player player = recordToPlayer(result.get().recordOrThrow());
-        player.setOnline(isOnline);
-        return player;
+        player.get().setOnline(isOnline);
+        return player.get();
     }
 
     /** Resets a player to offline, no shield, not being attacked. Sets the score too if >= 0. */
@@ -352,17 +333,14 @@ public class PlayerMatching implements UseCase {
             result.get().recordOrThrow();
             return true;
         }
-        catch (AerospikeException ae) {
-            if (ae.getResultCode() == ResultCode.FILTERED_OUT) {
-                return false;
-            }
-            throw ae;
+        catch (AerospikeException.FilteredException fe) {
+            return false;
         }
     }
 
     public int testEligibility(Session session) {
         int playerId = 1;
-        int originalScore = session.query(getPlayerKey(1)).execute().getFirst().orElseThrow().recordOrThrow().getInt("score");
+        int originalScore = session.query(getPlayerKey(1)).execute().getFirstRecord().getInt("score");
         System.out.printf("%nTesting eligibility for player %d%n", playerId);
         resetPlayerTo(session, playerId, 590);
         System.out.printf("- Checking player can validly be attacked: %s%n",

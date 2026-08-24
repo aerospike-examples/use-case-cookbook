@@ -16,18 +16,16 @@ public final class HotKeyKeys {
     private HotKeyKeys() {
     }
 
-    public static DataSet products() {
-        return DataSet.of(System.getProperty("demo.namespace", "test"), "uccb_hotkey");
-    }
+    public static final DataSet PRODUCTS = DataSet.of(System.getProperty("demo.namespace", "test"), "uccb_hotkey");
 
     /** Primary (single-key) record used in the baseline simulation. */
     public static Key primary(long productId) {
-        return products().id(productId);
+        return PRODUCTS.id(productId);
     }
 
     /** Replica/shard key {@code productId:index}. */
     public static Key replica(long productId, int index) {
-        return products().id(productId + ":" + index);
+        return PRODUCTS.id(productId + ":" + index);
     }
 
     public static Key randomReplica(long productId, int replicaCount) {

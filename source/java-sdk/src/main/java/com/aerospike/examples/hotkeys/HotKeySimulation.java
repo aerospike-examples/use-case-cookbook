@@ -65,12 +65,8 @@ public final class HotKeySimulation {
                     try {
                         attempt.execute();
                         totals.recordSuccess(System.nanoTime() - startNs);
-                    } catch (AerospikeException e) {
-                        if (e.getResultCode() == ResultCode.KEY_BUSY) {
-                            totals.recordKeyBusy();
-                        } else {
-                            totals.recordOtherError(describeError(e));
-                        }
+                    } catch (AerospikeException.KeyBusyException e) {
+                        totals.recordKeyBusy();
                     } catch (Exception e) {
                         totals.recordOtherError(describeError(e));
                     }

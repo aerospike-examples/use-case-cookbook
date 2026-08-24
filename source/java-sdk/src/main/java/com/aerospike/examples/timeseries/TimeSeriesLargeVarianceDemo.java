@@ -7,7 +7,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
-import java.util.Optional;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 
@@ -15,7 +14,6 @@ import com.aerospike.client.sdk.AerospikeException;
 import com.aerospike.client.sdk.DataSet;
 import com.aerospike.client.sdk.Key;
 import com.aerospike.client.sdk.Record;
-import com.aerospike.client.sdk.RecordResult;
 import com.aerospike.client.sdk.ResultCode;
 import com.aerospike.client.sdk.Session;
 import com.aerospike.client.sdk.cdt.ListOrder;
@@ -92,13 +90,11 @@ public class TimeSeriesLargeVarianceDemo implements UseCase {
         return "https://github.com/aerospike-examples/use-case-cookbook/blob/main/UseCases/timeseries-large-variance.md";
     }
 
-    private DataSet events() {
-        return DataSet.of(System.getProperty("demo.namespace", "test"), "uccb_events_variance");
-    }
+    private final DataSet events = DataSet.of(System.getProperty("demo.namespace", "test"), "uccb_events_variance");
 
     @Override
     public void setup(Session session) throws Exception {
-        session.truncate(events());
+        session.truncate(events);
         generateSampleData(session);
     }
 
@@ -116,11 +112,11 @@ public class TimeSeriesLargeVarianceDemo implements UseCase {
     }
 
     private Key createEventKey(String accountId, long timestamp) {
-        return events().id(accountId + ":" + getBucketOffset(timestamp));
+        return events.id(accountId + ":" + getBucketOffset(timestamp));
     }
 
     private Key getContinuationKeyFromKey(Key key, String subKey) {
-        return events().id(key.userKey.toString() + "-" + subKey);
+        return events.id(key.userKey.toString() + "-" + subKey);
     }
 
     private static long dateToLong(Date date) {
@@ -210,11 +206,11 @@ public class TimeSeriesLargeVarianceDemo implements UseCase {
     }
 
     private List<String> readContinuationList(Session session, Key rootKey) {
-        Optional<RecordResult> result = session.query(rootKey).readingOnlyBins(CONTINUATION_BIN).execute().getFirst();
-        if (result.isEmpty() || !result.get().isOk()) {
+        Record record = session.query(rootKey).readingOnlyBins(CONTINUATION_BIN).execute().getFirstRecord();
+        if (record == null) {
             return List.of();
         }
-        List<?> list = result.get().recordOrThrow().getList(CONTINUATION_BIN);
+        List<?> list = record.getList(CONTINUATION_BIN);
         return list == null ? List.of() : list.stream().map(item -> (String) item).toList();
     }
 
@@ -229,8 +225,8 @@ public class TimeSeriesLargeVarianceDemo implements UseCase {
             // Deliberately a separate call from the write above - requesting a write and a read of
             // the same bin in one operation returns a multi-result wrapper instead of a plain value
             // (see the equivalent note in PlayerMatching).
-            RecordResult result = session.upsert(key).bin(BIN_NAME).mapSize().execute().getFirst().orElseThrow();
-            return result.recordOrThrow().getLong(BIN_NAME);
+            Record record = session.upsert(key).bin(BIN_NAME).mapSize().execute().getFirstRecord();
+            return record.getLong(BIN_NAME);
         }
         catch (AerospikeException ae) {
             // Same eviction-disabled namespace gotcha as TimeSeriesDemo - see there for details.
@@ -254,11 +250,11 @@ public class TimeSeriesLargeVarianceDemo implements UseCase {
      */
     @SuppressWarnings("unchecked")
     private void splitBucket(Session session, Key rootKey, Key bucketKey) {
-        Optional<RecordResult> bucketResult = session.query(bucketKey).execute().getFirst();
-        if (bucketResult.isEmpty() || !bucketResult.get().isOk()) {
+        Record bucketRecord = session.query(bucketKey).execute().getFirstRecord();
+        if (bucketRecord == null) {
             return;
         }
-        Map<String, ?> map = (Map<String, ?>) bucketResult.get().recordOrThrow().getMap(BIN_NAME);
+        Map<String, ?> map = (Map<String, ?>) bucketRecord.getMap(BIN_NAME);
         List<Entry<String, ?>> entries = new ArrayList<>(map.entrySet());
 
         int threshold = entries.size() * PERCENT_EVENTS_IN_ORIG_BUCKET / 100;
@@ -326,13 +322,13 @@ public class TimeSeriesLargeVarianceDemo implements UseCase {
 
         if (direction == SortDirection.ASCENDING) {
             for (long recordKey = startRecord; results.size() < count && recordKey <= endRecord; recordKey++) {
-                Key key = events().id(accountId + ":" + recordKey);
+                Key key = events.id(accountId + ":" + recordKey);
                 processRootAndContinuations(session, key, earliestEventId, latestEventId, count, results, direction, deviceFilter);
             }
         }
         else {
             for (long recordKey = endRecord; results.size() < count && recordKey >= startRecord; recordKey--) {
-                Key key = events().id(accountId + ":" + recordKey);
+                Key key = events.id(accountId + ":" + recordKey);
                 processRootAndContinuations(session, key, earliestEventId, latestEventId, count, results, direction, deviceFilter);
             }
         }
@@ -342,18 +338,17 @@ public class TimeSeriesLargeVarianceDemo implements UseCase {
 
     private void processRootAndContinuations(Session session, Key rootKey, String earliestEventId, String latestEventId,
             int count, List<Event> results, SortDirection direction, java.util.Set<String> deviceFilter) {
-        Optional<RecordResult> rootResult = session.query(rootKey).execute().getFirst();
-        if (rootResult.isEmpty() || !rootResult.get().isOk()) {
+        Record record = session.query(rootKey).execute().getFirstRecord();
+        if (record == null) {
             return;
         }
-        Record record = rootResult.get().recordOrThrow();
         List<?> continuationBin = record.getList(CONTINUATION_BIN);
 
         addEventsToResults(count, readFilteredBucket(session, rootKey, earliestEventId, latestEventId), results, direction, deviceFilter);
 
         if (continuationBin != null && !continuationBin.isEmpty()) {
             @SuppressWarnings("unchecked")
-            List<String> continuation = (List<String>) (List<?>) continuationBin;
+            List<String> continuation = (List<String>) continuationBin;
             if (direction == SortDirection.ASCENDING) {
                 for (String subKey : continuation) {
                     if (subKey.compareTo(latestEventId) > 0 || results.size() >= count) {
@@ -385,10 +380,9 @@ public class TimeSeriesLargeVarianceDemo implements UseCase {
     }
 
     private Record readFilteredBucket(Session session, Key key, String earliestEventId, String latestEventId) {
-        Optional<RecordResult> result = session.query(key)
+        return session.query(key)
                 .bin(BIN_NAME).onMapKeyRange(earliestEventId, latestEventId).getKeysAndValues()
-                .execute().getFirst();
-        return result.isPresent() && result.get().isOk() ? result.get().recordOrThrow() : null;
+                .execute().getFirstRecord();
     }
 
     @SuppressWarnings("unchecked")

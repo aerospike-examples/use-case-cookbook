@@ -51,7 +51,7 @@ public class WriteHotKeyUseCase implements UseCase {
         Key primaryKey = HotKeyKeys.primary(productId);
         long sideOpIntervalMs = HotKeySimulationParams.PERIODIC_SIDE_OP_INTERVAL_MS;
 
-        try (HotKeyPendingLimitScope ignored = HotKeyPendingLimitScope.apply(session, HotKeyKeys.products().getNamespace(),
+        try (HotKeyPendingLimitScope ignored = HotKeyPendingLimitScope.apply(session, HotKeyKeys.PRODUCTS.getNamespace(),
                 HotKeySimulationParams.TRANSACTION_PENDING_LIMIT)) {
             HotKeySimulationStats baseline = simulation.run("Baseline - single write hot key", numThreads,
                     durationSecs, () -> session.upsert(primaryKey).bin("unitsSold").add(1).execute().close(),
@@ -59,7 +59,7 @@ public class WriteHotKeyUseCase implements UseCase {
                     sideOpIntervalMs);
 
             System.out.printf("Primary record unitsSold after baseline: %d%n",
-                    session.query(primaryKey).execute().getFirst().orElseThrow().recordOrThrow().getInt("unitsSold"));
+                    session.query(primaryKey).execute().getFirstRecord().getInt("unitsSold"));
 
             HotKeySimulationStats mitigated = simulation.run("Mitigation - random write shard", numThreads,
                     durationSecs, () -> {

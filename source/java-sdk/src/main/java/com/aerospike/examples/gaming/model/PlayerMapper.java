@@ -17,7 +17,10 @@ public class PlayerMapper implements RecordMapper<Player> {
                 (String) map.get("lastName"),
                 (String) map.get("email"),
                 (Long) map.get("shieldExpiry"),
-                (Boolean) map.get("online"),
+                // "online" is sometimes deliberately excluded from a partial-bin operate result
+                // (e.g. right after writing it, to avoid the write+read-same-bin multi-result
+                // wrapper) - default to false rather than NPE-ing on the unboxed null.
+                Boolean.TRUE.equals(map.get("online")),
                 (String) map.get("beingAttackedBy"),
                 ((Long) map.get("score")).intValue());
     }

@@ -5,14 +5,12 @@ import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.TreeMap;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
 
 import com.aerospike.client.sdk.Record;
-import com.aerospike.client.sdk.RecordResult;
 import com.aerospike.client.sdk.Session;
 import com.aerospike.client.sdk.TypedDataSet;
 import com.aerospike.client.sdk.TypedKey;
@@ -67,20 +65,17 @@ public class TopTransactionsAcrossDcs implements UseCase {
         return "https://github.com/aerospike-examples/use-case-cookbook/blob/main/UseCases/top-transactions-across-dcs.md";
     }
 
-    private TypedDataSet<Account> accounts() {
-        return TypedDataSet.of(System.getProperty("demo.namespace", "test"), "uccb_account", Account.class);
-    }
-
-    private TypedDataSet<Transaction> transactions() {
-        return TypedDataSet.of(System.getProperty("demo.namespace", "test"), "uccb_txn", Transaction.class);
-    }
+    private final TypedDataSet<Account> accounts =
+            TypedDataSet.of(System.getProperty("demo.namespace", "test"), "uccb_account", Account.class);
+    private final TypedDataSet<Transaction> transactions =
+            TypedDataSet.of(System.getProperty("demo.namespace", "test"), "uccb_txn", Transaction.class);
 
     public TypedKey<Account> getAccountKey(String id) {
-        return accounts().id(id);
+        return accounts.id(id);
     }
 
     public TypedKey<Transaction> getTransactionKey(String id) {
-        return transactions().id(id);
+        return transactions.id(id);
     }
 
     private String formMapKey(Transaction txn) {
@@ -89,9 +84,8 @@ public class TopTransactionsAcrossDcs implements UseCase {
 
     @Override
     public void setup(Session session) throws Exception {
-        TypedDataSet<Account> accounts = accounts();
         session.truncate(accounts);
-        session.truncate(transactions());
+        session.truncate(transactions);
 
         System.out.printf("Generating %,d accounts%n", NUM_ACCOUNTS);
         for (long i = 1; i <= NUM_ACCOUNTS; i++) {
@@ -141,7 +135,7 @@ public class TopTransactionsAcrossDcs implements UseCase {
                     binName = BIN_DC2;
                 }
                 txn.setOrigin(binName);
-                session.upsert(transactions()).object(txn).execute();
+                session.upsert(transactions).object(txn).execute();
 
                 // Insert the new transaction into the account's DC map, and trim that map to the most recent MAX_TRANSACTIONS.
                 session.upsert(getAccountKey(txn.getAccountId()))
@@ -174,11 +168,10 @@ public class TopTransactionsAcrossDcs implements UseCase {
     @SuppressWarnings("unchecked")
     public List<Transaction> getTopResults(Session session, int count, String accountId) {
         int countToUse = count + 3;
-        Optional<RecordResult> result = session.query(getAccountKey(accountId)).execute().getFirst();
-        if (result.isEmpty() || !result.get().isOk()) {
+        Record record = session.query(getAccountKey(accountId)).execute().getFirstRecord();
+        if (record == null) {
             return List.of();
         }
-        Record record = result.get().recordOrThrow();
         Map<String, ?> dc1 = (Map<String, ?>) record.getMap(BIN_DC1);
         Map<String, ?> dc2 = (Map<String, ?>) record.getMap(BIN_DC2);
 
@@ -194,6 +187,11 @@ public class TopTransactionsAcrossDcs implements UseCase {
                 .limit(countToUse)
                 .map(v -> (String) v)
                 .collect(Collectors.toList());
+        if (txnIds.isEmpty()) {
+            // No transactions have landed for this account yet (e.g. a display tick racing ahead
+            // of the generator right at startup) - a batch query requires at least one key.
+            return List.of();
+        }
 
         TypedKeyList<Transaction> keys = new TypedKeyList<>();
         txnIds.forEach(id -> keys.add(getTransactionKey(id)));

@@ -42,9 +42,8 @@ public class SetupDemo implements UseCase {
         return "https://github.com/aerospike-examples/use-case-cookbook/blob/main/UseCases/setup.md";
     }
 
-    private TypedDataSet<Account> accounts() {
-        return TypedDataSet.of(System.getProperty("demo.namespace", "test"), "uccb_account", Account.class);
-    }
+    private final TypedDataSet<Account> accounts =
+            TypedDataSet.of(System.getProperty("demo.namespace", "test"), "uccb_account", Account.class);
 
     private Account randomAccount() {
         String name = FIRST_NAMES[ThreadLocalRandom.current().nextInt(FIRST_NAMES.length)]
@@ -57,7 +56,6 @@ public class SetupDemo implements UseCase {
 
     @Override
     public void setup(Session session) throws Exception {
-        TypedDataSet<Account> accounts = accounts();
         session.truncate(accounts);
 
         System.out.printf("Generating %,d accounts...%n", NUM_ACCOUNTS);
@@ -71,7 +69,7 @@ public class SetupDemo implements UseCase {
     @Override
     public void run(Session session) throws Exception {
         System.out.println("Query first 100 accounts");
-        try (TypedRecordStream<Account> recordStream = session.query(accounts()).limit(100).execute()) {
+        try (TypedRecordStream<Account> recordStream = session.query(accounts).limit(100).execute()) {
             recordStream.forEachObject(account -> System.out.printf(
                     "Id: %s, Account Name: %s, Balance $%.02f, Date Opened: %s%n",
                     account.getId(),

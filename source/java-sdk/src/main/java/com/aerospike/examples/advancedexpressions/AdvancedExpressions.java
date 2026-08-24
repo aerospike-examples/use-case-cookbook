@@ -2,14 +2,14 @@ package com.aerospike.examples.advancedexpressions;
 
 import java.util.List;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.atomic.AtomicInteger;
 
-import com.aerospike.client.sdk.DataSet;
-import com.aerospike.client.sdk.Key;
 import com.aerospike.client.sdk.Record;
-import com.aerospike.client.sdk.RecordStream;
 import com.aerospike.client.sdk.Session;
+import com.aerospike.client.sdk.TypedDataSet;
+import com.aerospike.client.sdk.TypedKey;
+import com.aerospike.client.sdk.TypedRecordStream;
 import com.aerospike.client.sdk.cdt.ListOrder;
-import com.aerospike.client.sdk.cdt.ListPolicy;
 import com.aerospike.client.sdk.cdt.ListReturnType;
 import com.aerospike.client.sdk.exp.Exp;
 import com.aerospike.client.sdk.exp.ListExp;
@@ -61,9 +61,8 @@ public class AdvancedExpressions implements UseCase {
         return "https://github.com/aerospike-examples/use-case-cookbook/blob/main/UseCases/advanced-expressions.md";
     }
 
-    private DataSet cars() {
-        return DataSet.of(System.getProperty("demo.namespace", "test"), "uccb_car");
-    }
+    private final TypedDataSet<Car> cars =
+            TypedDataSet.of(System.getProperty("demo.namespace", "test"), "uccb_car", Car.class);
 
     private Car randomCar(int id) {
         int numFeatures = ThreadLocalRandom.current().nextInt(0, 9);
@@ -84,7 +83,6 @@ public class AdvancedExpressions implements UseCase {
 
     @Override
     public void setup(Session session) throws Exception {
-        DataSet cars = cars();
         session.truncate(cars);
 
         System.out.printf("Generating %,d Cars%n", NUM_CARS);
@@ -110,20 +108,37 @@ public class AdvancedExpressions implements UseCase {
 
         multipleCommandsInOneOperation(session);
 
-        Key key = cars().id(1);
+        // The "acc" list-append is written as AEL (verified against a live cluster to behave
+        // identically to ListExp.append) - per Tim's review comment to prefer AEL where possible.
+        // The "counter" read-back is NOT converted: every AEL index-read syntax tried against a live
+        // cluster ($.acc.getByIndex(0), $.acc[0], $.acc.{0}, $.acc.{0}.getValue()) threw the same
+        // server-side "Parameter error" that blocked Leaderboard's map-index read (see that class's
+        // getScoresAroundPlayer javadoc) - single-element list/map index reads via AEL appear to be
+        // an unsupported composition on this build, not just a syntax guess away. Kept on the
+        // proven ListExp.getByIndex Exp form; worth revisiting with correct syntax from Tim.
+        TypedKey<Car> key = cars.id(1);
         session.upsert(key)
                 .bin("acc").listCreate(ListOrder.UNORDERED)
-                .bin("acc").upsertFrom(ListExp.append(ListPolicy.Default, Exp.val(10), Exp.listBin("acc")))
+                .bin("acc").upsertFrom("$.acc.append(10)")
                 .bin("counter").upsertFrom(ListExp.getByIndex(ListReturnType.VALUE, Exp.Type.INT, Exp.val(0), Exp.listBin("acc")))
                 .bin("acc").remove()
                 .execute();
     }
 
+    /**
+     * Kept as {@code ListExp.getByValue(EXISTS, ...)} rather than an AEL string per Tim's review
+     * comment: tried two AEL translations of "value exists in a list bin" against a live cluster
+     * ({@code $.features.contains('Sunroof')} - server-side {@code Parameter error}; {@code
+     * $.features.{='Sunroof'}.count() > 0} - parses fine but silently returns 0 matches instead of
+     * the correct 10) and neither is safe to ship without an authoritative AEL grammar reference
+     * for list-membership/selector syntax. Worth revisiting with the correct syntax from Tim.
+     */
     private void findCarsWithFeature(Session session, String feature) {
         Exp exp = ListExp.getByValue(ListReturnType.EXISTS, Exp.val(feature), Exp.listBin("features"));
         showCarsMatchingExpression(session, exp, 10);
     }
 
+    /** Same rationale as {@link #findCarsWithFeature} - kept as Exp, not converted to AEL. */
     private void findCarsWithColors(Session session, List<String> colors) {
         Exp exp = ListExp.getByValue(ListReturnType.EXISTS, Exp.stringBin("color"), Exp.val(colors));
         showCarsMatchingExpression(session, exp, 10);
@@ -139,10 +154,10 @@ public class AdvancedExpressions implements UseCase {
      * </ul>
      */
     private void multipleCommandsInOneOperation(Session session) {
-        Key key = cars().id(1);
+        TypedKey<Car> key = cars.id(1);
         session.upsert(key).bin("color").setTo("Purple").execute();
         System.out.println("Record before augmenting:");
-        showCar(1, session.query(key).execute().getFirst().orElseThrow().recordOrThrow());
+        showCar(1, session.query(key).execute().getFirstRecord());
 
         // Written as AEL rather than nested Exp.let/Exp.def/Exp.cond builder calls - much easier to
         // read once the nesting gets this deep, and it's the same expression the server evaluates.
@@ -169,17 +184,17 @@ public class AdvancedExpressions implements UseCase {
                         """)
                 .execute();
         System.out.println("Record after augmenting:");
-        showCar(1, session.query(key).execute().getFirst().orElseThrow().recordOrThrow());
+        showCar(1, session.query(key).execute().getFirstRecord());
     }
 
     private void showCarsMatchingExpression(Session session, Exp exp, int limit) {
-        int count = 0;
-        try (RecordStream stream = session.query(cars()).where(exp).limit(limit).execute()) {
-            for (var result : stream.stream().toList()) {
+        AtomicInteger count = new AtomicInteger();
+        try (TypedRecordStream<Car> stream = session.query(cars).where(exp).limit(limit).execute()) {
+            stream.forEach(result -> {
                 if (result.isOk()) {
-                    showCar(++count, result.recordOrThrow());
+                    showCar(count.incrementAndGet(), result.recordOrThrow());
                 }
-            }
+            });
         }
     }
 

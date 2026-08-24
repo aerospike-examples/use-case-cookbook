@@ -53,7 +53,7 @@ public class ReadHotKeyUseCase implements UseCase {
         HotKeySimulation.OperationAttempt refreshAllCopies = () ->
                 HotKeyProductSetup.incrementUnitsSoldOnAllCopies(session, replicaCount);
 
-        try (HotKeyPendingLimitScope ignored = HotKeyPendingLimitScope.apply(session, HotKeyKeys.products().getNamespace(),
+        try (HotKeyPendingLimitScope ignored = HotKeyPendingLimitScope.apply(session, HotKeyKeys.PRODUCTS.getNamespace(),
                 HotKeySimulationParams.TRANSACTION_PENDING_LIMIT)) {
             simulation.run("Baseline - single read hot key", numThreads, durationSecs, () -> {
                 session.query(primaryKey).readingOnlyBins("sku", "description", "unitsSold").execute().close();

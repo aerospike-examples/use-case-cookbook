@@ -37,6 +37,27 @@ The reducer sits between your application threads and the Aerospike client:
 
 4. **Return results to callers.** Each submitting thread receives its result (or a shared result, depending on operation type) via a `CompletableFuture` completed when the batch finishes.
 
+### Transaction safety
+
+Hot-key **detection** is per `Key`, but in-memory **batching** is per `(Key, Txn)`:
+
+- Operations with `WritePolicy.txn == null` coalesce together (non-transactional batch).
+- Operations sharing the same `Txn` object coalesce together (transactional batch).
+- A transactional submit and a non-transactional submit on the same hot key produce **separate** batched `operate` calls — they are never merged.
+- Two threads using **different** `Txn` instances on the same key also get independent batches.
+
+Within one batch, all operations must share the same `filterExp`; the first submitter's `WritePolicy` (including timeouts) is used for the server call.
+
+```java
+WritePolicy wp1 = client.copyWritePolicyDefault();
+wp1.txn = txn1;
+reducer.submit(wp1, hotKey, Operation.add(new Bin("unitsSold", 1)));
+
+WritePolicy wp2 = client.copyWritePolicyDefault();
+wp2.txn = txn2;  // different Txn — separate batch, not merged with txn1
+reducer.submit(wp2, hotKey, Operation.add(new Bin("unitsSold", 1)));
+```
+
 ### Why this removes the hot key
 
 The hot key problem at the server is **too many concurrent transactions on one record**. The reducer attacks the source: it converts N concurrent client requests into 1 server request. Fewer pending transactions means fewer `KEY_BUSY` errors and lower queue latency — without changing the Aerospike key or data model.
@@ -67,10 +88,10 @@ The reducer is vendored from the standalone `hot-key-reducer` project. See `HotK
 |---------|------|
 | Keeps a **single key** — no schema change | Only coalesces within **one JVM**; multiple app instances each need their own reducer (or a shared coalescing tier) |
 | Dramatically cuts server round trips under burst load | Adds **latency** equal to the batch delay window for hot keys |
-| Works with commutative ops like `add` | All batched operations must share the **same WritePolicy** (including filter expressions) |
+| Works with commutative ops like `add` | All batched operations in one batch must share the same `filterExp` |
 | Transparent drop-in via `submit()` | Tuning-sensitive — thresholds affect when batching kicks in |
 | Reduces `KEY_BUSY` without splitting data | Does not help if the server-side single `operate` itself is the bottleneck |
-| One shared write policy per combined operation | Write policies must agree on items, especially the transaction the operations are in to be of use |
+| Transaction-safe batching per `(Key, Txn)` | Only coalesces within the same JVM and same transaction context |
 
 **Use in-process batching when:** many threads in the same process hammer one key, operations are batchable (increments, append, idempotent updates), you cannot shard the key, and you can tolerate milliseconds of additional latency on hot paths.
 

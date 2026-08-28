@@ -45,6 +45,12 @@
 			<artifactId>commons-cli</artifactId>
 			<version>${commons-cli.version}</version>
 		</dependency>
+		<!-- Terminal width detection for the interactive menu (see ../java's InteractiveMenu) -->
+		<dependency>
+			<groupId>org.jline</groupId>
+			<artifactId>jline</artifactId>
+			<version>3.23.0</version>
+		</dependency>
 	</dependencies>
 
 	<build>

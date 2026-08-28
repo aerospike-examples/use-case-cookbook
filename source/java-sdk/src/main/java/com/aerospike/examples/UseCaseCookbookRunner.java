@@ -9,6 +9,8 @@ import org.apache.commons.cli.CommandLineParser;
 import org.apache.commons.cli.DefaultParser;
 import org.apache.commons.cli.HelpFormatter;
 import org.apache.commons.cli.Options;
+import org.jline.terminal.Terminal;
+import org.jline.terminal.TerminalBuilder;
 
 import com.aerospike.client.sdk.AerospikeException;
 import com.aerospike.client.sdk.Cluster;
@@ -21,9 +23,11 @@ import com.aerospike.mapper.tools.AeroMapper;
 /**
  * Main entry point for the SDK port of the Use Case Cookbook.
  * <p/>
- * This is a pared-down port of the legacy {@code UseCaseCookbookRunner} (see ../../java) - only
- * the non-interactive, named-use-case path ({@code -uc}) is implemented so far. The interactive
- * menu, search, and cluster strong-consistency/transaction-shim detection have not been ported yet.
+ * This is a port of the legacy {@code UseCaseCookbookRunner} (see ../../java): the named-use-case
+ * path ({@code -uc}) and the interactive menu ({@link InteractiveMenu}, with its {@code search}/
+ * {@code /regex} commands - see {@code README_SEARCH.md} in ../../java, unchanged here) are both
+ * implemented. Cluster capability detection differs from the legacy version's full
+ * strong-consistency check - see {@link #detectTransactionSupport}.
  * <p/>
  * Object mapping uses the annotation-driven {@code aerospike-sdk-mapper-java} library (JOM-style
  * {@code @AerospikeRecord}/{@code @AerospikeKey} annotations on each model class), now that that
@@ -42,7 +46,8 @@ public class UseCaseCookbookRunner {
     public static void main(String[] args) throws Exception {
         SdkConnector connector = new SdkConnector();
         Options options = connector.getOptions();
-        options.addOption("uc", "useCaseName", true, "The name of the use case to run. Partial names are allowed");
+        options.addOption("uc", "useCaseName", true,
+                "The name of the use case to run. Partial names are allowed. If omitted, an interactive menu is shown");
         options.addOption("l", "listUseCases", false, "Show a list of all the use cases");
         options.addOption("ro", "runOnly", false, "Only execute the use case, do not seed data for it");
         options.addOption("so", "seedOnly", false, "Only seed (generate) the data, do not execute the use case");
@@ -63,12 +68,6 @@ public class UseCaseCookbookRunner {
         String error = connector.validateConnectionsOptions(cl);
         if (error != null) {
             System.out.println(error);
-            usage(options);
-            return;
-        }
-
-        if (!cl.hasOption("useCaseName")) {
-            System.out.println("No use case specified. Use -uc <name> to run one, or -l to list available use cases.");
             usage(options);
             return;
         }
@@ -102,8 +101,28 @@ public class UseCaseCookbookRunner {
                     ? cluster.createSession(Behavior.DEFAULT)
                     : cluster.createSession(Behavior.DEFAULT, NonTransactionalCapableSession::new);
 
-            executeUseCaseByName(cl.getOptionValue("useCaseName"), session, seedOnly, runOnly);
+            if (cl.hasOption("useCaseName")) {
+                executeUseCaseByName(cl.getOptionValue("useCaseName"), session, seedOnly, runOnly);
+            }
+            else {
+                runInteractiveMode(session);
+            }
         }
+    }
+
+    /**
+     * Runs the interactive menu ({@link InteractiveMenu}) when no {@code -uc} option is given.
+     * Mechanical port of ../../java's equivalent block in its own {@code main()} - see
+     * {@code InteractiveMenu}'s javadoc for what changed in the port.
+     */
+    private static void runInteractiveMode(Session session) throws Exception {
+        InteractiveMenu menu = new InteractiveMenu(session);
+        Terminal terminal = TerminalBuilder.terminal();
+        int width = terminal.getWidth();
+        if (width == 0) {
+            width = 200;
+        }
+        menu.runMenu(width);
     }
 
     /**

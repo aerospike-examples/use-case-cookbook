@@ -12,6 +12,7 @@
 
 	<properties>
 		<aerospike-client-sdk.version>0.9.0-alpha.2</aerospike-client-sdk.version>
+		<aerospike-sdk-mapper-java.version>1.0.0-SNAPSHOT</aerospike-sdk-mapper-java.version>
 		<project-lombok.version>1.18.38</project-lombok.version>
 		<commons-cli.version>1.4</commons-cli.version>
 		<maven.compiler.source>21</maven.compiler.source>
@@ -24,6 +25,14 @@
 			<groupId>com.aerospike</groupId>
 			<artifactId>aerospike-client-sdk</artifactId>
 			<version>${aerospike-client-sdk.version}</version>
+		</dependency>
+		<!-- Annotation-driven object mapping (aerospike-sdk-mapper-java) - requires the stage
+		     branch of aerospike-client-sdk, installed to the local Maven repo; not published to
+		     Central. Replaces the hand-written RecordMapper<T> implementations. -->
+		<dependency>
+			<groupId>com.aerospike</groupId>
+			<artifactId>aerospike-sdk-mapper-java</artifactId>
+			<version>${aerospike-sdk-mapper-java.version}</version>
 		</dependency>
 		<dependency>
 			<groupId>org.projectlombok</groupId>

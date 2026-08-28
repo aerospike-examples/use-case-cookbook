@@ -86,15 +86,23 @@ let (
 passed straight to `.bin("features").upsertFrom("""...""")` — verified against a live cluster to
 produce identical results to the builder-chain version.
 
-**This doesn't extend to every CDT composition yet.** `Leaderboard.getScoresAroundPlayer` composes
-a map `getByKey(..., INDEX)` lookup with a `getByIndexRange`; the equivalent AEL dot-call syntax
-(`$.score.getByKey('key', INDEX)`) parses fine client-side but returns a server-side `Parameter
-error` at execution time — almost certainly because an `INDEX`-return map lookup needs an explicit
-value-type hint (the Java API requires one, `Exp.Type.INT`, as an explicit argument) that isn't
-documented anywhere accessible from this build. Rather than guess at syntax for a
-scoring-correctness-critical expression, that one stays on the already-verified `Exp` builder form
-- see the comment on `getScoresAroundPlayer` for details. Worth revisiting once an authoritative
-AEL grammar reference for map/list return-type composition is available.
+**Use the canonical AEL reference, not third-party grammar repos.** The full language reference is
+saved at [`AEL_CANONICAL_REFERENCE.md`](../AEL_CANONICAL_REFERENCE.md) (courtesy of Tim Faulkes) —
+treat it as ground truth over any other grammar source when writing or debugging AEL. An earlier
+pass at this port used a different, non-canonical third-party grammar repo and got two compositions
+wrong as a result — both fixed once checked against the canonical doc:
+- `AdvancedExpressions`'s single-element list read now uses `$.acc.[0]:INT` — the type suffix was
+  missing; the earlier attempts guessed at nonexistent terminal methods instead
+  (`.get(return: INDEX)`) and failed for that reason, not because the read itself was unsupported.
+- `Leaderboard.getScoresAroundPlayer`'s combined index-lookup-plus-windowed-range read — previously
+  assumed impossible in AEL entirely — collapses to a single relative-range map selector,
+  `{-N:N~'key'}` (§5 of the canonical reference), replacing the original 5-line nested
+  `Exp.let`/`Exp.def`/`Exp.cond` + two separate `MapExp` reads. Verified against a live cluster with
+  a full (not sampled) diff against the original `Exp` composition across many buckets —
+  byte-identical, including automatic boundary clamping at the map's edges.
+
+Moral: an AEL expression that "can't" be written is usually a syntax gap on the author's side, not a
+language gap — check the canonical reference before concluding otherwise.
 
 ## Known limitations (alpha SDK)
 

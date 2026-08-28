@@ -152,7 +152,6 @@ public class PlayerMatching implements UseCase {
             });
         }
 
-        var mapper = session.getRecordMappingFactory().getMapper(Player.class);
         while (!validRecords.isEmpty()) {
             int recordNum = ThreadLocalRandom.current().nextInt(validRecords.size());
             int id = validRecords.get(recordNum).getInt("id");
@@ -160,7 +159,15 @@ public class PlayerMatching implements UseCase {
             // requesting both a write and a read of the same bin in one operation returns a
             // multi-result wrapper for that bin instead of a plain value, so we just set it
             // directly on the Player below from the value we already know we wrote.
-            Optional<Player> player = session.upsert(getPlayerKey(id))
+            //
+            // Decoded manually (not via the mapper) because this is an upsert-with-read-back, not
+            // a query: AeroRecordMapper.fromMap(Map, Key, int) - the 3-arg overload RecordStream
+            // .getFirst(RecordMapper<T>) calls here - unconditionally throws
+            // UnsupportedOperationException ("JOM requires a RecordReadContext for dependency
+            // resolution"), even for a dependency-free class like Player. The mapper only supports
+            // decoding through the SDK's typed query path (TypedKeyQueryBuilder/TypedRecordStream,
+            // which does pass that context), not this kind of write-then-read-selected-bins result.
+            Optional<RecordResult> result = session.upsert(getPlayerKey(id))
                     .where(filter)
                     .bin("beingAttackedBy").setTo("Player " + id)
                     .bin("id").get()
@@ -171,14 +178,15 @@ public class PlayerMatching implements UseCase {
                     .bin("shieldExpiry").get()
                     .bin("online").get()
                     .bin("score").get()
-                    .execute().getFirst(mapper);
+                    .execute().getFirst();
 
-            if (player.isEmpty()) {
+            if (result.isEmpty() || !result.get().isOk()) {
                 validRecords.remove(recordNum);
             }
             else {
-                player.get().setBeingAttackedBy("Player " + id);
-                return player;
+                Player player = recordToPlayer(result.get().recordOrThrow());
+                player.setBeingAttackedBy("Player " + id);
+                return Optional.of(player);
             }
         }
         return Optional.empty();
@@ -276,16 +284,32 @@ public class PlayerMatching implements UseCase {
     }
 
     /**
+     * Manually decodes a {@code Player} from a {@code Record} of the selected bins. Needed
+     * because {@code AeroRecordMapper}'s 3-arg {@code fromMap(Map, Key, int)} - the overload
+     * {@code RecordStream.getFirst(RecordMapper<T>)} calls - unconditionally throws
+     * {@code UnsupportedOperationException("JOM requires a RecordReadContext for dependency
+     * resolution")}, even for a dependency-free class like {@code Player}. The mapper only
+     * decodes through the SDK's typed query path (which does supply that context), not an
+     * upsert-with-read-back result like {@link #findPlayerToAttack} and {@link #setPlayerOnline}
+     * produce.
+     */
+    private Player recordToPlayer(Record rec) {
+        return new Player(rec.getInt("id"), rec.getString("userName"), rec.getString("firstName"),
+                rec.getString("lastName"), rec.getString("email"), rec.getLong("shieldExpiry"),
+                rec.getBoolean("online"), rec.getString("beingAttackedBy"), rec.getInt("score"));
+    }
+
+    /**
      * Sets a player online and returns their details, or {@code null} if {@code isOnline} is true
      * and the player was already online.
      */
     public Player setPlayerOnline(Session session, int playerId, boolean isOnline) {
         // A where clause of "" applies no filter, so the isOnline/not-isOnline cases don't need
         // separate builder-reassignment branches.
-        var mapper = session.getRecordMappingFactory().getMapper(Player.class);
         // "online" is set above but deliberately not also read back below - see the equivalent
-        // note in findPlayerToAttack.
-        Optional<Player> player = session.upsert(getPlayerKey(playerId))
+        // note in findPlayerToAttack. Decoded manually rather than via the mapper - see
+        // recordToPlayer's javadoc for why.
+        Optional<RecordResult> result = session.upsert(getPlayerKey(playerId))
                 .where(isOnline ? "$.online == false" : "")
                 .bin("online").setTo(isOnline)
                 .bin("id").get()
@@ -296,12 +320,13 @@ public class PlayerMatching implements UseCase {
                 .bin("shieldExpiry").get()
                 .bin("beingAttackedBy").get()
                 .bin("score").get()
-                .execute().getFirst(mapper);
-        if (player.isEmpty()) {
+                .execute().getFirst();
+        if (result.isEmpty() || !result.get().isOk()) {
             return null;
         }
-        player.get().setOnline(isOnline);
-        return player.get();
+        Player player = recordToPlayer(result.get().recordOrThrow());
+        player.setOnline(isOnline);
+        return player;
     }
 
     /** Resets a player to offline, no shield, not being attacked. Sets the score too if >= 0. */

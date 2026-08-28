@@ -2,8 +2,6 @@ package com.aerospike.examples;
 
 import java.io.PrintWriter;
 import java.io.StringWriter;
-import java.util.HashMap;
-import java.util.Map;
 import java.util.Optional;
 
 import org.apache.commons.cli.CommandLine;
@@ -15,31 +13,10 @@ import org.apache.commons.cli.Options;
 import com.aerospike.client.sdk.AerospikeException;
 import com.aerospike.client.sdk.Cluster;
 import com.aerospike.client.sdk.DataSet;
-import com.aerospike.client.sdk.DefaultRecordMappingFactory;
-import com.aerospike.client.sdk.RecordMapper;
 import com.aerospike.client.sdk.ResultCode;
 import com.aerospike.client.sdk.Session;
 import com.aerospike.client.sdk.policy.Behavior;
-import com.aerospike.examples.onetomany.model.Agent;
-import com.aerospike.examples.onetomany.model.AgentMapper;
-import com.aerospike.examples.onetomany.model.Listing;
-import com.aerospike.examples.onetomany.model.ListingMapper;
-import com.aerospike.examples.setup.model.Account;
-import com.aerospike.examples.setup.model.AccountMapper;
-import com.aerospike.examples.manytomany.model.Customer;
-import com.aerospike.examples.manytomany.model.CustomerMapper;
-import com.aerospike.examples.gaming.model.Player;
-import com.aerospike.examples.gaming.model.PlayerMapper;
-import com.aerospike.examples.transactionprocessing.model.Transaction;
-import com.aerospike.examples.transactionprocessing.model.TransactionMapper;
-import com.aerospike.examples.recordversioning.model.TradeBase;
-import com.aerospike.examples.recordversioning.model.TradeBaseMapper;
-import com.aerospike.examples.recordversioning.model.TradeStaticData;
-import com.aerospike.examples.recordversioning.model.TradeStaticDataMapper;
-import com.aerospike.examples.hotkeys.model.HotKeyProduct;
-import com.aerospike.examples.hotkeys.model.HotKeyProductMapper;
-import com.aerospike.examples.advancedexpressions.model.Car;
-import com.aerospike.examples.advancedexpressions.model.CarMapper;
+import com.aerospike.mapper.tools.AeroMapper;
 
 /**
  * Main entry point for the SDK port of the Use Case Cookbook.
@@ -48,31 +25,19 @@ import com.aerospike.examples.advancedexpressions.model.CarMapper;
  * the non-interactive, named-use-case path ({@code -uc}) is implemented so far. The interactive
  * menu, search, and cluster strong-consistency/transaction-shim detection have not been ported yet.
  * <p/>
- * Per Tim Faulkes' guidance on CLIENT-5234, object mapping uses the SDK's own built-in
- * {@code RecordMapper}/{@code Cluster.setRecordMappingFactory} mechanism rather than the external
- * {@code aerospike-sdk-mapper-java} project (which needs an unstable, hand-built {@code stage}
- * branch of the SDK to compile against). Every model's {@code RecordMapper} is registered here,
- * once, and shared by every use case - mirroring the single client+mapper pair the legacy
- * {@code UseCaseCookbookRunner} builds and hands to every use case.
+ * Object mapping uses the annotation-driven {@code aerospike-sdk-mapper-java} library (JOM-style
+ * {@code @AerospikeRecord}/{@code @AerospikeKey} annotations on each model class), now that that
+ * library compiles cleanly against the SDK's {@code stage} branch. Earlier in this port it needed
+ * hand-written {@code RecordMapper<T>} implementations per model instead, because the mapper
+ * library didn't compile against the SDK build at the time; those are gone now that it's fixed.
+ * <p/>
+ * NOTE: annotation attributes must be compile-time constants, so every model hardcodes
+ * {@code namespace = "test"} rather than reading the {@code -Ddemo.namespace} JVM system property
+ * this repo otherwise supports - the mapper library has no dynamic per-call namespace override
+ * hook. This only matters if someone actually overrides {@code demo.namespace} away from "test",
+ * which no use case in this repo currently exercises.
  */
 public class UseCaseCookbookRunner {
-
-    private static Map<Class<?>, RecordMapper<?>> buildMappers() {
-        Map<Class<?>, RecordMapper<?>> mappers = new HashMap<>();
-        mappers.put(Account.class, new AccountMapper());
-        mappers.put(Agent.class, new AgentMapper());
-        mappers.put(Listing.class, new ListingMapper());
-        mappers.put(Customer.class, new CustomerMapper());
-        mappers.put(com.aerospike.examples.manytomany.model.Account.class, new com.aerospike.examples.manytomany.model.AccountMapper());
-        mappers.put(Player.class, new PlayerMapper());
-        mappers.put(Transaction.class, new TransactionMapper());
-        mappers.put(com.aerospike.examples.transactionprocessing.model.Account.class, new com.aerospike.examples.transactionprocessing.model.AccountMapper());
-        mappers.put(TradeBase.class, new TradeBaseMapper());
-        mappers.put(TradeStaticData.class, new TradeStaticDataMapper());
-        mappers.put(HotKeyProduct.class, new HotKeyProductMapper());
-        mappers.put(Car.class, new CarMapper());
-        return mappers;
-    }
 
     public static void main(String[] args) throws Exception {
         SdkConnector connector = new SdkConnector();
@@ -117,7 +82,13 @@ public class UseCaseCookbookRunner {
         }
 
         try (Cluster cluster = connector.connect()) {
-            cluster.setRecordMappingFactory(new DefaultRecordMappingFactory(buildMappers()));
+            // Bootstrap session used only to construct AeroMapper (no typed operations are
+            // performed on it) - setRecordMappingFactory must happen before the real session used
+            // for use case work is created, matching the existing detectTransactionSupport pattern
+            // of a throwaway session for setup purposes.
+            Session bootstrapSession = cluster.createSession(Behavior.DEFAULT);
+            AeroMapper aeroMapper = new AeroMapper.Builder(bootstrapSession).build();
+            cluster.setRecordMappingFactory(aeroMapper.asMappingFactory());
 
             boolean transactionsSupported = detectTransactionSupport(cluster);
             if (!transactionsSupported) {

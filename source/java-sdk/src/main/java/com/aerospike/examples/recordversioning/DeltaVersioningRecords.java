@@ -12,13 +12,13 @@ import java.util.concurrent.ThreadLocalRandom;
 
 import com.aerospike.client.sdk.ChainableOperationBuilder;
 import com.aerospike.client.sdk.Record;
+import com.aerospike.client.sdk.RecordMapper;
 import com.aerospike.client.sdk.Session;
 import com.aerospike.client.sdk.TypedDataSet;
 import com.aerospike.client.sdk.TypedKey;
 import com.aerospike.client.sdk.cdt.MapOrder;
 import com.aerospike.examples.UseCase;
 import com.aerospike.examples.recordversioning.model.TradeBase;
-import com.aerospike.examples.recordversioning.model.TradeBaseMapper;
 
 /**
  * SDK port of the legacy {@code DeltaVersioningRecords} (see ../../java). Same {@link TradeBase}
@@ -82,7 +82,7 @@ public class DeltaVersioningRecords implements UseCase {
         session.truncate(tradeBases);
 
         System.out.printf("Generating %,d trades%n", NUM_RECORDS);
-        TradeBaseMapper mapper = new TradeBaseMapper();
+        RecordMapper<TradeBase> mapper = session.getRecordMappingFactory().getMapper(TradeBase.class);
         for (long id = 0; id < NUM_RECORDS; id++) {
             TradeBase trade = randomTradeBase(id);
             Map<String, Object> initial = mapper.toMap(trade);

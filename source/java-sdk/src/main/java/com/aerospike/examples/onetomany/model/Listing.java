@@ -2,6 +2,9 @@ package com.aerospike.examples.onetomany.model;
 
 import java.util.Date;
 
+import com.aerospike.mapper.annotations.AerospikeKey;
+import com.aerospike.mapper.annotations.AerospikeRecord;
+
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -9,7 +12,9 @@ import lombok.NoArgsConstructor;
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
+@AerospikeRecord(namespace = "test", set = "uccb_listing")
 public class Listing {
+    @AerospikeKey
     private String id;
     private String line1;
     private String line2;

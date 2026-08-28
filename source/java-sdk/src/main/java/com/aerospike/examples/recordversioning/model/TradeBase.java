@@ -4,10 +4,15 @@ import java.util.Date;
 import java.util.HashMap;
 import java.util.Map;
 
+import com.aerospike.mapper.annotations.AerospikeKey;
+import com.aerospike.mapper.annotations.AerospikeRecord;
+
 import lombok.Data;
 
 @Data
+@AerospikeRecord(namespace = "test", set = "uccb_tradebase")
 public class TradeBase {
+    @AerospikeKey
     private long id;
     private String sourceSystemId;
     private int version;

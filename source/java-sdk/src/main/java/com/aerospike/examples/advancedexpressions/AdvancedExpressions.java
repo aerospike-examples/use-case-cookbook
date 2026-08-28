@@ -10,9 +10,6 @@ import com.aerospike.client.sdk.TypedDataSet;
 import com.aerospike.client.sdk.TypedKey;
 import com.aerospike.client.sdk.TypedRecordStream;
 import com.aerospike.client.sdk.cdt.ListOrder;
-import com.aerospike.client.sdk.cdt.ListReturnType;
-import com.aerospike.client.sdk.exp.Exp;
-import com.aerospike.client.sdk.exp.ListExp;
 import com.aerospike.examples.UseCase;
 import com.aerospike.examples.advancedexpressions.model.Car;
 
@@ -108,35 +105,29 @@ public class AdvancedExpressions implements UseCase {
 
         multipleCommandsInOneOperation(session);
 
-        // The "acc" list-append is written as AEL (verified against a live cluster to behave
-        // identically to ListExp.append) - per Tim's review comment to prefer AEL where possible.
-        // The "counter" read-back is NOT converted: tried the grammar-correct dot-bracket list-index
-        // selector in three forms - bare $.acc.[0], $.acc.[0].get(return: VALUE), and $.acc.[0].get
-        // (return: INDEX) - all three lifted directly from the canonical, tested grammar at
-        // https://github.com/aerospike/aerospike-expression-lang-java (ListExpressionsTests.java,
-        // e.g. "$.listBin1.[0].get(return: INDEX) == 1"). All three throw the identical server-side
-        // "Parameter error" against this alpha SDK build's bundled AEL implementation (a separate,
-        // internal implementation under com.aerospike.client.sdk.ael, not this library). Since
-        // syntax lifted verbatim from a passing upstream test still fails here, this is a genuine
-        // gap/bug in this SDK build's CDT list-selector support, not a syntax guess - worth flagging
-        // to the SDK team directly rather than continuing to guess at syntax. Kept on the proven
-        // ListExp.getByIndex Exp form.
+        // Both the append and the index read-back are AEL. The read-back needed a `:TYPE` suffix
+        // on the path (`$.acc.[0]:INT`) - the server can't infer a scalar read's type from the path
+        // alone, so it must be pinned explicitly (see ../../AEL_CANONICAL_REFERENCE.md, section
+        // 3.3, per Tim Faulkes). Earlier attempts guessed at terminal methods instead
+        // (.get(return: INDEX)/.get(return: VALUE), based on a different, non-canonical grammar
+        // reference) and all failed - the actual fix was a type suffix, not a different terminal.
+        // Verified against a live cluster to return the expected value.
         TypedKey<Car> key = cars.id(1);
         session.upsert(key)
                 .bin("acc").listCreate(ListOrder.UNORDERED)
                 .bin("acc").upsertFrom("$.acc.append(10)")
-                .bin("counter").upsertFrom(ListExp.getByIndex(ListReturnType.VALUE, Exp.Type.INT, Exp.val(0), Exp.listBin("acc")))
+                .bin("counter").upsertFrom("$.acc.[0]:INT")
                 .bin("acc").remove()
                 .execute();
     }
 
     /**
      * AEL translation of {@code ListExp.getByValue(EXISTS, ...)}, using the language's {@code
-     * value in $.bin} membership operator - verified against a live cluster (full, unsampled diff
-     * of matching ids against the Exp version, not just a count) to return an identical result set.
-     * The earlier {@code .contains(...)}/{@code .{=...}.count()} guesses were wrong syntax, not a
-     * real capability gap - the correct grammar (confirmed against
-     * https://github.com/aerospike/aerospike-expression-lang-java) uses the {@code in} keyword.
+     * value in $.bin} membership operator (see ../../AEL_CANONICAL_REFERENCE.md, section 8.1) -
+     * verified against a live cluster (full, unsampled diff of matching ids against the Exp
+     * version, not just a count) to return an identical result set. The earlier {@code
+     * .contains(...)}/{@code .{=...}.count()} guesses were wrong syntax (from a non-canonical
+     * grammar reference), not a real capability gap.
      */
     private void findCarsWithFeature(Session session, String feature) {
         showCarsMatchingExpression(session, "'" + feature + "' in $.features", 10);

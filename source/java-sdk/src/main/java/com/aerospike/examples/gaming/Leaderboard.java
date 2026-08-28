@@ -13,9 +13,6 @@ import com.aerospike.client.sdk.Session;
 import com.aerospike.client.sdk.TypedDataSet;
 import com.aerospike.client.sdk.TypedKeyList;
 import com.aerospike.client.sdk.cdt.MapOrder;
-import com.aerospike.client.sdk.cdt.MapReturnType;
-import com.aerospike.client.sdk.exp.Exp;
-import com.aerospike.client.sdk.exp.MapExp;
 import com.aerospike.examples.Async;
 import com.aerospike.examples.UseCase;
 import com.aerospike.examples.gaming.model.Player;
@@ -226,70 +223,37 @@ public class Leaderboard implements UseCase {
     }
 
     /**
-     * Gets the scores on either side of a player's score. Queries this player's index within its
-     * bucket's map and returns a clamped index range either side of it, pulling in extra entries
-     * from neighboring buckets if the range overflows the current bucket.
+     * Gets the scores on either side of a player's score. Reads a clamped index range either side
+     * of the player's map key directly, pulling in extra entries from neighboring buckets if the
+     * range overflows the current bucket.
      * <p/>
-     * Kept as nested {@code Exp.let}/{@code Exp.def}/{@code Exp.cond} builder calls rather than an
-     * AEL string (unlike {@code AdvancedExpressions}), for two independent reasons found while
-     * investigating Tim Faulkes' PR review comment on this method:
-     * <ol>
-     *   <li>The final range read (getting a clamped window of keys either side of {@code index})
-     *       needs computed bounds inside a selector, e.g. {@code $.score.{(${startIndex}):
-     *       (${startIndex} + ${count})}.getKeys()}. Checked against the canonical grammar at
-     *       {@code https://github.com/aerospike/aerospike-expression-lang-java}
-     *       ({@code indexRangeIdentifier: start ':' end}, where {@code start}/{@code end} are
-     *       literal {@code signedInt} tokens, not expressions) - this composition is genuinely not
-     *       part of the AEL language yet, not just unsupported on this SDK build. Matches Tim's own
-     *       comment that "AEL cannot do nested expressions in selectors."</li>
-     *   <li>Independently, even the single-selector {@code index = MapExp.getByKey(INDEX, ...)}
-     *       half Tim said should work fails too - tried directly against a live cluster as {@code
-     *       $.score.&lt;mapKey&gt;.get(return: INDEX)} (both a bare-identifier and a quoted-string
-     *       form of the literal map key), the same shape used successfully for {@code
-     *       $.listBin1.[0].get(return: INDEX)} in the canonical grammar's own passing test - both
-     *       forms throw the identical server-side "Parameter error" here. The analogous list-index
-     *       read ({@code $.acc.[0]}, also lifted verbatim from that same upstream test - see
-     *       {@code AdvancedExpressions}'s comment) fails identically too. Since syntax copied from a
-     *       passing upstream test still fails on two different CDT types, this looks like a genuine
-     *       gap/bug in this alpha SDK build's AEL-to-CDT-selector translation, not a syntax guess
-     *       away - worth flagging to the SDK team directly rather than continuing to guess.</li>
-     * </ol>
-     * Net effect: even the "should work" half of this method can't currently be done in AEL on
-     * this build, so the whole thing stays on the already-proven Exp builder form.
+     * Written as a single AEL relative-range map selector ({@code {-N:N~key}} - see the canonical
+     * reference at ../../AEL_CANONICAL_REFERENCE.md, section 5) rather than the original nested
+     * {@code Exp.let}/{@code Exp.def}/{@code Exp.cond} + two separate {@code MapExp} reads. This
+     * replaces the whole index-lookup-then-clamped-range composition with one read, and the server
+     * clamps automatically at the map's boundaries (no manual {@code startIndex}/{@code count}
+     * clamping needed for the same-bucket portion). Verified against a live cluster with a full
+     * side-by-side diff against the original Exp composition across many buckets - byte-identical
+     * results. The earlier conclusion that this needed unsupported nested-expression selectors was
+     * based on a non-canonical grammar reference; the canonical AEL reference's relative-range
+     * selector form solves it directly.
      */
     public List<Player> getScoresAroundPlayer(Session session, int playerId, int score, int numPlayersEitherSide) {
         String mapKey = getMapKey(playerId, score);
-
-        Exp lowerPlayers = Exp.let(
-                Exp.def("index",
-                        MapExp.getByKey(MapReturnType.INDEX, Exp.Type.INT, Exp.val(mapKey), Exp.mapBin(SCOREBOARD_BIN))),
-                Exp.def("startIndex",
-                        Exp.cond(
-                                Exp.ge(Exp.var("index"), Exp.val(numPlayersEitherSide)),
-                                Exp.sub(Exp.var("index"), Exp.val(numPlayersEitherSide)),
-                                Exp.val(0))),
-                Exp.def("count",
-                        Exp.cond(
-                                Exp.ge(Exp.var("index"), Exp.val(numPlayersEitherSide)),
-                                Exp.val(numPlayersEitherSide),
-                                Exp.var("index"))),
-                MapExp.getByIndexRange(MapReturnType.KEY, Exp.var("startIndex"), Exp.var("count"), Exp.mapBin(SCOREBOARD_BIN)));
-
-        Exp higherPlayers = Exp.let(
-                Exp.def("index",
-                        MapExp.getByKey(MapReturnType.INDEX, Exp.Type.INT, Exp.val(mapKey), Exp.mapBin(SCOREBOARD_BIN))),
-                MapExp.getByIndexRange(MapReturnType.KEY, Exp.var("index"), Exp.val(numPlayersEitherSide + 1), Exp.mapBin(SCOREBOARD_BIN)));
+        String escapedKey = mapKey.replace("'", "\\'");
+        String ael = String.format("$.%s.{-%d:%d~'%s'}.getKeys()",
+                SCOREBOARD_BIN, numPlayersEitherSide, numPlayersEitherSide, escapedKey);
 
         int playerBucket = determineBucketForScore(score);
         Record result = session.query(getScoreboardKey(score))
-                .bin("lowerPlayers").selectFrom(lowerPlayers)
-                .bin("higherPlayers").selectFrom(higherPlayers)
+                .bin("combined").selectFrom(ael)
                 .execute().getFirstRecord();
 
         @SuppressWarnings("unchecked")
-        List<String> lowerPlayersList = new ArrayList<>((List<String>) result.getList("lowerPlayers"));
-        @SuppressWarnings("unchecked")
-        List<String> higherPlayersList = new ArrayList<>((List<String>) result.getList("higherPlayers"));
+        List<String> combined = new ArrayList<>((List<String>) result.getList("combined"));
+        int keyPos = combined.indexOf(mapKey);
+        List<String> lowerPlayersList = new ArrayList<>(combined.subList(0, keyPos));
+        List<String> higherPlayersList = new ArrayList<>(combined.subList(keyPos, combined.size()));
 
         addOverflowLowerPlayersIfNeeded(session, lowerPlayersList, playerBucket, numPlayersEitherSide);
         addOverflowHigherPlayersIfNeeded(session, higherPlayersList, playerBucket, numPlayersEitherSide);

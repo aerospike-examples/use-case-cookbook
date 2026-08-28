@@ -4,11 +4,8 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
-import java.util.Map;
-import java.util.TreeMap;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicLong;
-import java.util.stream.Collectors;
 
 import com.aerospike.client.sdk.Record;
 import com.aerospike.client.sdk.Session;
@@ -32,10 +29,13 @@ import com.aerospike.examples.transactionprocessing.model.Transaction;
  * <p/>
  * The legacy version merges the two DC maps and takes the top N in one round trip via a nested
  * conditional expression ({@code Exp.cond} + {@code MapExp.putItems} + {@code
- * MapExp.getByIndexRange}). Given the nested-{@code MapExp} composition gap already found while
- * porting {@code TimeSeriesDemo} against this alpha SDK build, this port merges the two maps
- * client-side in {@link #getTopResults} instead of risking the same kind of nested-expression
- * failure.
+ * MapExp.getByIndexRange}); an earlier pass at this port assumed the AEL equivalent wasn't
+ * expressible (the same pre-canonical-reference conclusion later found wrong for {@link
+ * com.aerospike.examples.timeseries.TimeSeriesDemo}'s device filter) and merged the two maps
+ * client-side instead. Re-checked against the canonical AEL reference and it works - see {@link
+ * #getTopResults} for the derivation, including the {@code let}-binding needed to select a range
+ * on a merged map, and the {@code when}-gated fallback for when one or both DC bins don't exist
+ * yet (an account with no transactions in a DC, common early in a run).
  */
 public class TopTransactionsAcrossDcs implements UseCase {
 
@@ -164,29 +164,38 @@ public class TopTransactionsAcrossDcs implements UseCase {
      * Retrieves the most recent transactions for an account across both DC maps, merged and
      * sorted by their "timestamp-id" map key. Over-fetches by a few entries since a transaction's
      * map entry can arrive slightly before the transaction record itself.
+     * <p/>
+     * Merge-plus-top-N is a single AEL read: {@code putItems} merges {@code txns_dc2} into {@code
+     * txns_dc1} (key-ordered, so the merge result is already sorted); the merged map can't be
+     * selector-ranged directly ({@code $.a.putItems($.b).{-N:}} is a parse error - {@code
+     * putItems()} is a path write terminal, so the chain ends there), but binding it to a {@code
+     * let} variable and re-navigating from {@code (${var})} (canonical reference §4.2's rule for
+     * continuing a path after a parenthesised expression) works. A {@code when} wraps the whole
+     * thing to handle a DC bin not existing yet - {@code $.dc1.putItems($.dc2)} throws if either
+     * bin is absent (bin navigation is strict by default, §4.1), which happens for any account
+     * that hasn't received a transaction in one or both DCs.
      */
     @SuppressWarnings("unchecked")
     public List<Transaction> getTopResults(Session session, int count, String accountId) {
         int countToUse = count + 3;
-        Record record = session.query(getAccountKey(accountId)).execute().getFirstRecord();
+        String ael = String.format(
+                "when ("
+                        + "$.%1$s.exists() and $.%2$s.exists() => (let (merged = $.%1$s.putItems($.%2$s)) then ((${merged}).{-%3$d:})), "
+                        + "$.%1$s.exists() => $.%1$s.{-%3$d:}, "
+                        + "$.%2$s.exists() => $.%2$s.{-%3$d:}, "
+                        + "default => []"
+                        + ")",
+                BIN_DC1, BIN_DC2, countToUse);
+        Record record = session.query(getAccountKey(accountId)).bin("top").selectFrom(ael).execute().getFirstRecord();
         if (record == null) {
             return List.of();
         }
-        Map<String, ?> dc1 = (Map<String, ?>) record.getMap(BIN_DC1);
-        Map<String, ?> dc2 = (Map<String, ?>) record.getMap(BIN_DC2);
+        List<?> topAscending = record.getList("top");
 
-        TreeMap<String, Object> merged = new TreeMap<>();
-        if (dc1 != null) {
-            merged.putAll(dc1);
+        List<String> txnIds = new ArrayList<>();
+        for (int i = topAscending.size() - 1; i >= 0; i--) {
+            txnIds.add((String) topAscending.get(i));
         }
-        if (dc2 != null) {
-            merged.putAll(dc2);
-        }
-
-        List<String> txnIds = merged.descendingMap().values().stream()
-                .limit(countToUse)
-                .map(v -> (String) v)
-                .collect(Collectors.toList());
         if (txnIds.isEmpty()) {
             // No transactions have landed for this account yet (e.g. a display tick racing ahead
             // of the generator right at startup) - a batch query requires at least one key.

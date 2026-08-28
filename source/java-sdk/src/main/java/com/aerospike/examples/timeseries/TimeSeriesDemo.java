@@ -5,7 +5,6 @@ import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 import java.util.Map;
-import java.util.Map.Entry;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
@@ -24,9 +23,8 @@ import com.aerospike.examples.timeseries.model.Event;
  * partitioned by account and bucketed into fixed-width time windows (one record per account per
  * bucket); each record holds a key-ordered map from a time-sortable {@code eventId} to a
  * {@code [deviceId, eventDetails]} pair, so range/pagination queries against a bucket become map
- * key-range operations. Device filtering is applied client-side after that (see {@link
- * #readFilteredBucket} for why - the legacy version's nested-expression, fully-server-side version
- * of this filter doesn't work against this alpha SDK build).
+ * key-range operations. Device filtering is also pushed down server-side via an AEL selector-plus-
+ * filter expression (see {@link #readFilteredBucket}).
  * <p/>
  * Unlike the legacy version, this port doesn't hold its own {@code IAerospikeClient}/{@code
  * AutoCloseable} lifecycle or a {@code main()} - the runner owns the {@code Session} and passes it
@@ -261,14 +259,14 @@ public class TimeSeriesDemo implements UseCase {
 
         if (direction == SortDirection.ASCENDING) {
             for (long recordKey = startRecord; results.size() < count && recordKey <= endRecord; recordKey++) {
-                Record record = readFilteredBucket(session, events.id(accountId + ":" + recordKey), earliestEventId, latestEventId);
-                addEventsToResults(count, record, results, direction, deviceFilter);
+                Record record = readFilteredBucket(session, events.id(accountId + ":" + recordKey), earliestEventId, latestEventId, deviceFilter);
+                addEventsToResults(count, record, results, direction);
             }
         }
         else {
             for (long recordKey = endRecord; results.size() < count && recordKey >= startRecord; recordKey--) {
-                Record record = readFilteredBucket(session, events.id(accountId + ":" + recordKey), earliestEventId, latestEventId);
-                addEventsToResults(count, record, results, direction, deviceFilter);
+                Record record = readFilteredBucket(session, events.id(accountId + ":" + recordKey), earliestEventId, latestEventId, deviceFilter);
+                addEventsToResults(count, record, results, direction);
             }
         }
 
@@ -312,45 +310,69 @@ public class TimeSeriesDemo implements UseCase {
     // ------------------------------------------------------------------
 
     /**
-     * Reads a bucket's events restricted to an eventId key range.
+     * Reads a bucket's events restricted to an eventId key range, with device filtering (when
+     * requested) also pushed down server-side.
      * <p/>
-     * The legacy version pushes device filtering down into this same server-side call too, via a
-     * nested map expression ({@code MapExp.getByValueList} over the result of {@code
-     * MapExp.getByKeyRange}, matching entries against a wildcard-tailed {@code [deviceId, *]}
-     * value list). That nested-expression form consistently returns a "Parameter error" (result
-     * code 4) against this alpha SDK build/cluster regardless of how the wildcard value list is
-     * encoded (tried both a raw {@code SpecialValue.WILDCARD} and its {@code toAerospikeValue()}
-     * form) - flagged as an SDK/expression-API gap to raise with the SDK team rather than force a
-     * workaround into the expression itself. Device filtering is therefore applied client-side in
-     * {@link #addEventToResults} instead; the key-range filtering (the part proven to work) still
-     * happens server-side here.
+     * The legacy version's device filter is a nested map expression ({@code
+     * MapExp.getByValueList} over the result of {@code MapExp.getByKeyRange}, matching entries
+     * against a wildcard-tailed {@code [deviceId, *]} value list); an earlier pass at this port
+     * tried the equivalent in raw {@code Exp}/{@code MapExp} builder calls and concluded it wasn't
+     * expressible against this alpha SDK build. Re-checked against the canonical AEL reference
+     * (courtesy of Tim Faulkes - see ../../AEL_CANONICAL_REFERENCE.md §4.4, §5, §7) instead of
+     * that builder API, and it works directly: a map key-range selector chained with a filter
+     * (not a wildcard - {@code &[?(…)]} is the selector-then-filter form in §4.4, not {@code
+     * .*[?(…)]}) against the loop variable's first list element:
+     * {@code $.map.{@'<earliest>':'<latest>'}&[?(@.[0] in ['dev1','dev2'])]}. Verified live: the
+     * filtered read returns exactly the matching {@code [deviceId, eventDetails]} entries, still
+     * in key order (implicit-get on a map-range/filter path returns a flat LIST of values, so no
+     * separate {@code getKeysAndValues()}-style terminal is needed - see {@link
+     * #addEventsToResults}), with zero matches correctly returning an empty list rather than an
+     * error.
      */
-    private Record readFilteredBucket(Session session, Key key, String earliestEventId, String latestEventId) {
-        return session.query(key)
-                .bin(BIN_NAME).onMapKeyRange(earliestEventId, latestEventId).getKeysAndValues()
-                .execute().getFirstRecord();
+    private Record readFilteredBucket(Session session, Key key, String earliestEventId, String latestEventId,
+            java.util.Set<String> deviceFilter) {
+        StringBuilder ael = new StringBuilder()
+                .append("$.").append(BIN_NAME)
+                .append(".{@'").append(escapeAelLiteral(earliestEventId))
+                .append("':'").append(escapeAelLiteral(latestEventId)).append("'}");
+        if (deviceFilter != null && !deviceFilter.isEmpty()) {
+            ael.append("&[?(@.[0] in [");
+            boolean first = true;
+            for (String deviceId : deviceFilter) {
+                if (!first) {
+                    ael.append(',');
+                }
+                first = false;
+                ael.append('\'').append(escapeAelLiteral(deviceId)).append('\'');
+            }
+            ael.append("])]");
+        }
+        return session.query(key).bin(BIN_NAME).selectFrom(ael.toString()).execute().getFirstRecord();
+    }
+
+    private static String escapeAelLiteral(String s) {
+        return s.replace("'", "\\'");
     }
 
     @SuppressWarnings("unchecked")
-    private void addEventsToResults(int count, Record record, List<Event> results, SortDirection direction, java.util.Set<String> deviceFilter) {
+    private void addEventsToResults(int count, Record record, List<Event> results, SortDirection direction) {
         if (record == null) {
             return;
         }
-        // MapReturnType.KEY_VALUE comes back as a Map (key-ordered, so iteration order == key order)
-        // rather than the legacy client's flat list of key/value pairs.
-        Map<String, ?> map = (Map<String, ?>) record.getMap(BIN_NAME);
-        List<Entry<String, ?>> entryList = new ArrayList<>(map.entrySet());
+        // The AEL selector's implicit get returns a flat LIST of [deviceId, eventDetails] pairs
+        // (already key-range- and device-filtered server-side), in key order.
+        List<List<?>> entries = (List<List<?>>) (List<?>) record.getList(BIN_NAME);
 
         if (direction == SortDirection.DESCENDING) {
-            for (int i = entryList.size() - 1; i >= 0; i--) {
-                if (!addEventToResults(count, (List<?>) entryList.get(i).getValue(), results, deviceFilter)) {
+            for (int i = entries.size() - 1; i >= 0; i--) {
+                if (!addEventToResults(count, entries.get(i), results)) {
                     break;
                 }
             }
         }
         else {
-            for (Entry<String, ?> entry : entryList) {
-                if (!addEventToResults(count, (List<?>) entry.getValue(), results, deviceFilter)) {
+            for (List<?> entry : entries) {
+                if (!addEventToResults(count, entry, results)) {
                     break;
                 }
             }
@@ -358,13 +380,9 @@ public class TimeSeriesDemo implements UseCase {
     }
 
     @SuppressWarnings("unchecked")
-    private boolean addEventToResults(int count, List<?> value, List<Event> results, java.util.Set<String> deviceFilter) {
+    private boolean addEventToResults(int count, List<?> value, List<Event> results) {
         if (results.size() >= count) {
             return false;
-        }
-        String deviceId = (String) value.get(0);
-        if (deviceFilter != null && !deviceFilter.contains(deviceId)) {
-            return true;
         }
         Map<String, Object> eventMap = (Map<String, Object>) value.get(1);
         results.add(convertMapToEvent(eventMap));

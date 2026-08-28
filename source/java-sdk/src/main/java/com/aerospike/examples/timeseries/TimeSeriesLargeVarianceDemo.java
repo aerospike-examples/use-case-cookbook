@@ -2,11 +2,11 @@ package com.aerospike.examples.timeseries;
 
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Map.Entry;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 
@@ -33,12 +33,23 @@ import com.aerospike.examples.timeseries.model.Event;
  * which sub-record(s) it needs, and a write walks it to find which sub-record a new event belongs
  * in (recursing into that sub-record's own split if it, in turn, overflows).
  * <p/>
- * The legacy version does each split as a single round-trip using conditional CDT write
- * expressions ({@code Exp.cond} + {@code MapExp.put}/{@code removeByIndexRange} combined with
- * {@code ExpOperation.write(..., EVAL_NO_FAIL)}). Given the nested-{@code MapExp} composition gap
- * already found in {@link TimeSeriesDemo} against this alpha SDK build, this port takes the more
- * conservative route of a straightforward read-then-write inside a transaction instead - more
- * round trips, but not dependent on unverified nested write-expression behavior.
+ * The legacy version does the split-detection-and-removal half of this as a single round-trip
+ * conditional CDT write expression ({@code Exp.cond} + {@code MapExp.getByIndexRange}/{@code
+ * removeByIndexRange} combined with {@code ExpOperation.write(..., EVAL_NO_FAIL)}) against the
+ * bucket record - an earlier pass at this port assumed that wasn't expressible against this alpha
+ * SDK build (the same pre-canonical-reference conclusion later found wrong for {@link
+ * TimeSeriesDemo}'s device filter) and fell back to a plain read-then-write. Re-checked against
+ * the canonical AEL reference and it works: {@link #splitBucket} now does the conditional
+ * get-minority-and-remove-it as one {@code operate()} call on the bucket record, same as legacy.
+ * One deliberate behavior change from this port's earlier version: the split point is now a fixed
+ * item count ({@link #MINOR_SPLIT_ITEMS}, derived from {@code MAX_RECORDS_PER_BUCKET} and {@code
+ * PERCENT_EVENTS_IN_ORIG_BUCKET} the same way the legacy version derives it) rather than a
+ * percentage of the bucket's current size - AEL selector bounds must be static literals (a
+ * computed expression like "count() * 80 / 100" isn't allowed inside {@code {…}}, per the
+ * canonical reference §4.2), so a fixed split count is what makes this expressible in one
+ * server-side call at all. Observable behavior is effectively identical: a bucket still splits
+ * once it crosses {@code MAX_RECORDS_PER_BUCKET}, moving its newest few events to a continuation
+ * record.
  */
 public class TimeSeriesLargeVarianceDemo implements UseCase {
 
@@ -51,6 +62,7 @@ public class TimeSeriesLargeVarianceDemo implements UseCase {
     private static final String CONTINUATION_BIN = "cont";
     private static final int MAX_RECORDS_PER_BUCKET = 10;
     private static final int PERCENT_EVENTS_IN_ORIG_BUCKET = 80;
+    private static final int MINOR_SPLIT_ITEMS = MAX_RECORDS_PER_BUCKET * (100 - PERCENT_EVENTS_IN_ORIG_BUCKET) / 100;
 
     private static final long MILLIS_PER_HOUR = TimeUnit.HOURS.toMillis(1);
     private static final long DATE_OFFSET_MILLIS = TimeUnit.DAYS.toMillis(LocalDate.of(2024, 1, 1).toEpochDay());
@@ -244,35 +256,38 @@ public class TimeSeriesLargeVarianceDemo implements UseCase {
     }
 
     /**
-     * Splits an overflowing bucket: the oldest {@code PERCENT_EVENTS_IN_ORIG_BUCKET}% of its
-     * events stay in place, the rest move to a new continuation sub-record, and the split point
-     * is recorded on the root record's (ascending, ordered) {@code cont} list.
+     * Splits an overflowing bucket: conditionally (only when the bucket's current size is still
+     * {@code >= MAX_RECORDS_PER_BUCKET}) reads and removes its newest {@link #MINOR_SPLIT_ITEMS}
+     * events in one atomic {@code operate()} call against the bucket record, then - if anything
+     * was removed - persists that minority slice to a new continuation sub-record and records the
+     * split point on the root record's (ascending, ordered) {@code cont} list.
+     * <p/>
+     * The {@code when(...)} condition re-checks the size rather than trusting the caller, because
+     * {@link #upsertEvent} calls this right after a separate write that may have raced with
+     * another writer - matching the legacy version's own re-check for the same reason.
      */
     @SuppressWarnings("unchecked")
     private void splitBucket(Session session, Key rootKey, Key bucketKey) {
-        Record bucketRecord = session.query(bucketKey).execute().getFirstRecord();
-        if (bucketRecord == null) {
-            return;
-        }
-        Map<String, ?> map = (Map<String, ?>) bucketRecord.getMap(BIN_NAME);
-        List<Entry<String, ?>> entries = new ArrayList<>(map.entrySet());
+        String minorityAel = String.format(
+                "when ($.%s:MAP.count() >= %d => $.%s.{-%d:}.getMaps(), default => {})",
+                BIN_NAME, MAX_RECORDS_PER_BUCKET, BIN_NAME, MINOR_SPLIT_ITEMS);
+        String majorityAel = String.format(
+                "when ($.%s:MAP.count() >= %d => $.%s.{-%d:}.remove(), default => $.%s.{0:}.getMaps())",
+                BIN_NAME, MAX_RECORDS_PER_BUCKET, BIN_NAME, MINOR_SPLIT_ITEMS, BIN_NAME);
 
-        int threshold = entries.size() * PERCENT_EVENTS_IN_ORIG_BUCKET / 100;
-        List<Entry<String, ?>> minority = entries.subList(threshold, entries.size());
-        if (minority.isEmpty()) {
+        Record result = session.upsert(bucketKey)
+                .bin("minorityOut").selectFrom(minorityAel)
+                .bin(BIN_NAME).upsertFrom(majorityAel)
+                .execute().getFirstRecord();
+
+        Map<String, Object> minorityMap = (Map<String, Object>) result.getMap("minorityOut");
+        if (minorityMap == null || minorityMap.isEmpty()) {
             return;
         }
-        List<Entry<String, ?>> majority = entries.subList(0, threshold);
-        String splitPointEventId = minority.get(0).getKey();
+        String splitPointEventId = Collections.min(minorityMap.keySet());
         Key minorityKey = getContinuationKeyFromKey(rootKey, splitPointEventId);
 
-        Map<String, Object> minorityMap = new HashMap<>();
-        minority.forEach(e -> minorityMap.put(e.getKey(), e.getValue()));
-        Map<String, Object> majorityMap = new HashMap<>();
-        majority.forEach(e -> majorityMap.put(e.getKey(), e.getValue()));
-
         session.upsert(minorityKey).bin(BIN_NAME).setTo(minorityMap).execute();
-        session.upsert(bucketKey).bin(BIN_NAME).setTo(majorityMap).execute();
         session.upsert(rootKey)
                 .bin(CONTINUATION_BIN).listCreate(ListOrder.ORDERED)
                 .bin(CONTINUATION_BIN).listAppend(splitPointEventId, opts -> opts.addUnique().allowFailures())
@@ -344,7 +359,7 @@ public class TimeSeriesLargeVarianceDemo implements UseCase {
         }
         List<?> continuationBin = record.getList(CONTINUATION_BIN);
 
-        addEventsToResults(count, readFilteredBucket(session, rootKey, earliestEventId, latestEventId), results, direction, deviceFilter);
+        addEventsToResults(count, readFilteredBucket(session, rootKey, earliestEventId, latestEventId, deviceFilter), results, direction);
 
         if (continuationBin != null && !continuationBin.isEmpty()) {
             @SuppressWarnings("unchecked")
@@ -355,14 +370,14 @@ public class TimeSeriesLargeVarianceDemo implements UseCase {
                         break;
                     }
                     Key subRecordKey = getContinuationKeyFromKey(rootKey, subKey);
-                    addEventsToResults(count, readFilteredBucket(session, subRecordKey, earliestEventId, latestEventId), results, direction, deviceFilter);
+                    addEventsToResults(count, readFilteredBucket(session, subRecordKey, earliestEventId, latestEventId, deviceFilter), results, direction);
                 }
             }
             else {
                 for (int i = continuation.size() - 1; i >= 0; i--) {
                     String subKey = continuation.get(i);
                     Key subRecordKey = getContinuationKeyFromKey(rootKey, subKey);
-                    addEventsToResults(count, readFilteredBucket(session, subRecordKey, earliestEventId, latestEventId), results, direction, deviceFilter);
+                    addEventsToResults(count, readFilteredBucket(session, subRecordKey, earliestEventId, latestEventId, deviceFilter), results, direction);
                     if (subKey.compareTo(earliestEventId) < 0 || results.size() >= count) {
                         break;
                     }
@@ -379,30 +394,54 @@ public class TimeSeriesLargeVarianceDemo implements UseCase {
         return getEventsBetween(session, accountId, null, null, eventId, count, SortDirection.ASCENDING, deviceIds);
     }
 
-    private Record readFilteredBucket(Session session, Key key, String earliestEventId, String latestEventId) {
-        return session.query(key)
-                .bin(BIN_NAME).onMapKeyRange(earliestEventId, latestEventId).getKeysAndValues()
-                .execute().getFirstRecord();
+    /**
+     * Reads a bucket's events restricted to an eventId key range, with device filtering (when
+     * requested) also pushed down server-side. See {@link TimeSeriesDemo#readFilteredBucket} for
+     * the identical AEL selector-plus-filter derivation and why it replaced the client-side
+     * filtering this port originally used.
+     */
+    private Record readFilteredBucket(Session session, Key key, String earliestEventId, String latestEventId,
+            java.util.Set<String> deviceFilter) {
+        StringBuilder ael = new StringBuilder()
+                .append("$.").append(BIN_NAME)
+                .append(".{@'").append(escapeAelLiteral(earliestEventId))
+                .append("':'").append(escapeAelLiteral(latestEventId)).append("'}");
+        if (deviceFilter != null && !deviceFilter.isEmpty()) {
+            ael.append("&[?(@.[0] in [");
+            boolean first = true;
+            for (String deviceId : deviceFilter) {
+                if (!first) {
+                    ael.append(',');
+                }
+                first = false;
+                ael.append('\'').append(escapeAelLiteral(deviceId)).append('\'');
+            }
+            ael.append("])]");
+        }
+        return session.query(key).bin(BIN_NAME).selectFrom(ael.toString()).execute().getFirstRecord();
+    }
+
+    private static String escapeAelLiteral(String s) {
+        return s.replace("'", "\\'");
     }
 
     @SuppressWarnings("unchecked")
-    private void addEventsToResults(int count, Record record, List<Event> results, SortDirection direction, java.util.Set<String> deviceFilter) {
+    private void addEventsToResults(int count, Record record, List<Event> results, SortDirection direction) {
         if (record == null) {
             return;
         }
-        Map<String, ?> map = (Map<String, ?>) record.getMap(BIN_NAME);
-        List<Entry<String, ?>> entryList = new ArrayList<>(map.entrySet());
+        List<List<?>> entries = (List<List<?>>) (List<?>) record.getList(BIN_NAME);
 
         if (direction == SortDirection.DESCENDING) {
-            for (int i = entryList.size() - 1; i >= 0; i--) {
-                if (!addEventToResults(count, (List<?>) entryList.get(i).getValue(), results, deviceFilter)) {
+            for (int i = entries.size() - 1; i >= 0; i--) {
+                if (!addEventToResults(count, entries.get(i), results)) {
                     break;
                 }
             }
         }
         else {
-            for (Entry<String, ?> entry : entryList) {
-                if (!addEventToResults(count, (List<?>) entry.getValue(), results, deviceFilter)) {
+            for (List<?> entry : entries) {
+                if (!addEventToResults(count, entry, results)) {
                     break;
                 }
             }
@@ -410,13 +449,9 @@ public class TimeSeriesLargeVarianceDemo implements UseCase {
     }
 
     @SuppressWarnings("unchecked")
-    private boolean addEventToResults(int count, List<?> value, List<Event> results, java.util.Set<String> deviceFilter) {
+    private boolean addEventToResults(int count, List<?> value, List<Event> results) {
         if (results.size() >= count) {
             return false;
-        }
-        String deviceId = (String) value.get(0);
-        if (deviceFilter != null && !deviceFilter.contains(deviceId)) {
-            return true;
         }
         Map<String, Object> eventMap = (Map<String, Object>) value.get(1);
         results.add(convertMapToEvent(eventMap));

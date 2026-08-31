@@ -34,7 +34,7 @@ Adding a new use case involves five main steps:
 
 Create your POJOs (Plain Old Java Objects) in a `model` subdirectory within your use case package. Use Lombok annotations for cleaner code and add `@GenMagic` for automatic data generation.
 
-**Location:** `source/src/main/java/com/aerospike/examples/<your-package>/model/`
+**Location:** `source/java/src/main/java/com/aerospike/examples/<your-package>/model/`
 
 **Key annotations:**
 - `@Data` - Generates getters, setters, toString, equals, and hashCode
@@ -60,7 +60,7 @@ This automatically generates "SKU-000001", "SKU-000002", etc.
 
 Create your main use case class that implements the `UseCase` interface.
 
-**Location:** `source/src/main/java/com/aerospike/examples/<your-package>/`
+**Location:** `source/java/src/main/java/com/aerospike/examples/<your-package>/`
 
 **Required methods:**
 - `String getName()` - Brief, descriptive name
@@ -82,7 +82,7 @@ Create your main use case class that implements the `UseCase` interface.
 
 Add your use case to the registry so it appears in the menu.
 
-**File:** `source/src/main/java/com/aerospike/examples/UseCaseRegistry.java`
+**File:** `source/java/src/main/java/com/aerospike/examples/UseCaseRegistry.java`
 
 ```java
 private static final List<UseCase> USE_CASES = List.of(
@@ -748,7 +748,7 @@ Real-time inventory tracking with concurrent updates, automatic reorder detectio
 ### 1. Build the Project
 
 ```bash
-cd source
+cd source/java
 mvn clean package
 ```
 
@@ -863,7 +863,7 @@ use-case-cookbook/
 ├── CONTRIBUTING.md (this file)
 ├── UseCases/
 │   └── inventory-management.md (new)
-└── source/src/main/java/com/aerospike/examples/
+└── source/java/src/main/java/com/aerospike/examples/
     ├── UseCaseRegistry.java (updated)
     └── inventory/
         ├── InventoryManagementDemo.java (new)

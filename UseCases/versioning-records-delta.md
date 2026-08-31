@@ -3,7 +3,7 @@
 
 Related pattern: [Versioning Records (full copy, point-in-time queries)](versioning-records.md)
 
-[Link to working code](../source/src/main/java/com/aerospike/examples/recordversioning/DeltaVersioningRecords.java)
+[Link to working code (legacy Java client)](../source/java/src/main/java/com/aerospike/examples/recordversioning/DeltaVersioningRecords.java) | [Link to working code (Java SDK)](../source/java-sdk/src/main/java/com/aerospike/examples/recordversioning/DeltaVersioningRecords.java)
 
 ## Use Case
 
@@ -84,7 +84,7 @@ changes:      [
 - **Version 0** (`id:0`) — created on initial insert; every written bin is listed with status `Inserted`
 - **Version 1+** (`id:1`, `id:2`, …) — only bins that actually changed (status other than `Same`)
 
-When the `recordContents` parameter is enabled, each change entry includes `newValue` (except for `Removed`), allowing [`reconstructAtVersion()`](../source/src/main/java/com/aerospike/examples/recordversioning/DeltaVersioningRecords.java) to replay history from version 0 onward.
+When the `recordContents` parameter is enabled (legacy Java client), each change entry includes `newValue` (except for `Removed`), allowing [`reconstructAtVersion()`](../source/java/src/main/java/com/aerospike/examples/recordversioning/DeltaVersioningRecords.java) to replay history from version 0 onward. The Java SDK port ([`reconstructAtVersion()`](../source/java-sdk/src/main/java/com/aerospike/examples/recordversioning/DeltaVersioningRecords.java)) always records `newValue` - it doesn't have a `recordContents` toggle.
 
 ### The Versions Map
 
@@ -370,5 +370,5 @@ Choose this pattern when you need to know **who changed what**. Choose [full ver
 
 ## Source Code
 
-- [DeltaVersioningRecords.java](../source/src/main/java/com/aerospike/examples/recordversioning/DeltaVersioningRecords.java)
-- [TradeBase.java](../source/src/main/java/com/aerospike/examples/recordversioning/model/TradeBase.java)
+- DeltaVersioningRecords.java: [legacy](../source/java/src/main/java/com/aerospike/examples/recordversioning/DeltaVersioningRecords.java) | [Java SDK](../source/java-sdk/src/main/java/com/aerospike/examples/recordversioning/DeltaVersioningRecords.java)
+- TradeBase.java: [legacy](../source/java/src/main/java/com/aerospike/examples/recordversioning/model/TradeBase.java) | [Java SDK](../source/java-sdk/src/main/java/com/aerospike/examples/recordversioning/model/TradeBase.java)

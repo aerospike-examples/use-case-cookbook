@@ -104,7 +104,7 @@ let (
 ```
 passed straight to `.bin("features").upsertFrom("""...""")`.
 
-**Use [`AEL_CANONICAL_REFERENCE.md`](../AEL_CANONICAL_REFERENCE.md), not third-party grammar
+**Use [`AEL_CANONICAL_REFERENCE.md`](AEL_CANONICAL_REFERENCE.md), not third-party grammar
 repos**, when writing or debugging AEL in this module. Patterns used here that aren't obvious from
 a first read of the grammar:
 - A single-element scalar read needs an explicit `:TYPE` suffix: `$.acc.[0]:INT`

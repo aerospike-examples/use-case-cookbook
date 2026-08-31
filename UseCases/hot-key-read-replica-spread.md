@@ -3,7 +3,7 @@
 
 Related patterns: [Write (Shard + Merge)](hot-key-write-shard-merge.md) · [Write (HotKeyReducer)](hot-key-write-reducer.md)
 
-[Link to working code](../source/src/main/java/com/aerospike/examples/hotkeys/ReadHotKeyUseCase.java)
+[Link to working code (legacy Java client)](../source/java/src/main/java/com/aerospike/examples/hotkeys/ReadHotKeyUseCase.java) | [Link to working code (Java SDK)](../source/java-sdk/src/main/java/com/aerospike/examples/hotkeys/ReadHotKeyUseCase.java)
 
 ## The Problem
 
@@ -51,7 +51,7 @@ Key replicaKey = HotKeyKeys.randomReplica(mapper, productId, replicaCount);
 client.get(null, replicaKey, "sku", "description", "unitsSold");
 ```
 
-Replica keys are constructed in [HotKeyKeys.java](../source/src/main/java/com/aerospike/examples/hotkeys/HotKeyKeys.java) as `productId + ":" + index`, giving each replica a unique user key and digest.
+Replica keys are constructed in `HotKeyKeys.java` ([legacy](../source/java/src/main/java/com/aerospike/examples/hotkeys/HotKeyKeys.java) | [Java SDK](../source/java-sdk/src/main/java/com/aerospike/examples/hotkeys/HotKeyKeys.java)) as `productId + ":" + index`, giving each replica a unique user key and digest.
 
 ### Keeping replicas in sync
 
@@ -70,7 +70,7 @@ client.operate(
         Operation.add(new Bin("unitsSold", 1)));
 ```
 
-This is implemented in [HotKeyProductSetup.incrementUnitsSoldOnAllCopies](../source/src/main/java/com/aerospike/examples/hotkeys/HotKeyProductSetup.java) and invoked ~every 100ms during both simulation phases as background refresh traffic alongside the read load.
+This is implemented in `HotKeyProductSetup.incrementUnitsSoldOnAllCopies` ([legacy](../source/java/src/main/java/com/aerospike/examples/hotkeys/HotKeyProductSetup.java) | [Java SDK](../source/java-sdk/src/main/java/com/aerospike/examples/hotkeys/HotKeyProductSetup.java)) and invoked ~every 100ms during both simulation phases as background refresh traffic alongside the read load.
 
 ## Trade-offs and When to Use
 

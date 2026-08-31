@@ -1,7 +1,7 @@
 # Time series data across multiple DCs
 [Back to all use cases](../README.md)
 
-[Link to working code](../source/src/main/java/com/aerospike/examples/transactionprocessing/TopTransactionsAcrossDcs.java)
+[Link to working code (legacy Java client)](../source/java/src/main/java/com/aerospike/examples/transactionprocessing/TopTransactionsAcrossDcs.java) | [Link to working code (Java SDK)](../source/java-sdk/src/main/java/com/aerospike/examples/transactionprocessing/TopTransactionsAcrossDcs.java)
 
 ## Use case
 In a fraud detection scenario for financial services, the most recent transactions are the most important. In this use case, the finanical institution wants to retrieve the 50 most recent transactions for an account. The transactions will live in a table (set) by themselves and have an appropriate time-to-live on them, but retrieving the 50 most recent for an account in low single-digit milliseconds is needed to be able to power their fraud detection algorithms.

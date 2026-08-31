@@ -3,7 +3,7 @@
 
 Related pattern: [Delta Versioning Records (audit trail)](versioning-records-delta.md)
 
-[Link to working code](../source/src/main/java/com/aerospike/examples/recordversioning/VersioningRecords.java)
+[Link to working code (legacy Java client)](../source/java/src/main/java/com/aerospike/examples/recordversioning/VersioningRecords.java) | [Link to working code (Java SDK)](../source/java-sdk/src/main/java/com/aerospike/examples/recordversioning/VersioningRecords.java)
 
 This document describes the **full version copy** pattern for point-in-time queries on `TradeBase` and associated `TradeStaticData`. For an audit-trail pattern that stores bin-level deltas instead of full copies, see [Delta Versioning Records](versioning-records-delta.md).
 
@@ -547,6 +547,6 @@ For an audit-trail pattern that stores only bin-level deltas, see [Delta Version
 
 Full implementation available at:
 
-- [VersioningRecords.java](../source/src/main/java/com/aerospike/examples/recordversioning/VersioningRecords.java)
-- [TradeBase.java](../source/src/main/java/com/aerospike/examples/recordversioning/model/TradeBase.java)
-- [TradeStaticData.java](../source/src/main/java/com/aerospike/examples/recordversioning/model/TradeStaticData.java)
+- VersioningRecords.java: [legacy](../source/java/src/main/java/com/aerospike/examples/recordversioning/VersioningRecords.java) | [Java SDK](../source/java-sdk/src/main/java/com/aerospike/examples/recordversioning/VersioningRecords.java)
+- TradeBase.java: [legacy](../source/java/src/main/java/com/aerospike/examples/recordversioning/model/TradeBase.java) | [Java SDK](../source/java-sdk/src/main/java/com/aerospike/examples/recordversioning/model/TradeBase.java)
+- TradeStaticData.java: [legacy](../source/java/src/main/java/com/aerospike/examples/recordversioning/model/TradeStaticData.java) | [Java SDK](../source/java-sdk/src/main/java/com/aerospike/examples/recordversioning/model/TradeStaticData.java)

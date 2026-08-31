@@ -1,7 +1,7 @@
 # Time series data with high variance
 [Back to all use cases](../README.md)
 
-[Link to working code](../source/src/main/java/com/aerospike/examples/timeseries/TimeSeriesLargeVarianceDemo.java)
+[Link to working code (legacy Java client)](../source/java/src/main/java/com/aerospike/examples/timeseries/TimeSeriesLargeVarianceDemo.java) | [Link to working code (Java SDK)](../source/java-sdk/src/main/java/com/aerospike/examples/timeseries/TimeSeriesLargeVarianceDemo.java)
 
 ## Use case
 This use case extends the [time series](timeseries.md) use case for situations where there can be high variance in the number of items to be recorded. Many situations call for a normal distribution (aka "bell curve") of events against devices, where there are many devices which generate a small number of events, but there are a few devices which generate exceptionally large numbers of events. 

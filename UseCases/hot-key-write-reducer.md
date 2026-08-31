@@ -3,7 +3,7 @@
 
 Related patterns: [Read (Replica Spread)](hot-key-read-replica-spread.md) · [Write (Shard + Merge)](hot-key-write-shard-merge.md)
 
-[Link to working code](../source/src/main/java/com/aerospike/examples/hotkeys/ReducerHotKeyUseCase.java)
+[Link to working code (legacy Java client)](../source/java/src/main/java/com/aerospike/examples/hotkeys/ReducerHotKeyUseCase.java) | [Link to working code (Java SDK)](../source/java-sdk/src/main/java/com/aerospike/examples/hotkeys/ReducerHotKeyUseCase.java)
 
 ## The Problem
 
@@ -13,7 +13,7 @@ This is the write hot key problem without a schema change option: same rw-hash c
 
 ## How the Technique Works
 
-**In-process batching** (here via [HotKeyReducer](../source/src/main/java/com/aerospike/examples/hotkeys/helper/HotKeyReducer.java)) reduces server-side contention by coalescing many client-side operations into **one Aerospike `operate` call per batch** for a hot key.
+**In-process batching** (here via `HotKeyReducer` — [legacy](../source/java/src/main/java/com/aerospike/examples/hotkeys/helper/HotKeyReducer.java) | [Java SDK](../source/java-sdk/src/main/java/com/aerospike/examples/hotkeys/helper/HotKeyReducer.java)) reduces server-side contention by coalescing many client-side operations into **one Aerospike `operate` call per batch** for a hot key.
 
 The reducer sits between your application threads and the Aerospike client:
 

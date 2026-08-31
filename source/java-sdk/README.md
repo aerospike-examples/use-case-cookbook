@@ -21,22 +21,42 @@ If no seed node is passed, `localhost:3000` is assumed — use `-h <host:port>` 
 and `--help` for the rest of the connection options. The namespace defaults to `test`; override
 with `-Ddemo.namespace=<name>` as a JVM system property.
 
-Only the non-interactive, named-use-case path is implemented so far:
-- `-uc, --useCaseName <name>` — run a use case (partial name match allowed)
+CLI options:
+- `-uc, --useCaseName <name>` — run a use case (partial name match allowed); if omitted, launches
+  the interactive menu instead
 - `-l, --listUseCases` — list all registered use cases
 - `-ro, --runOnly` / `-so, --seedOnly` — skip `setup()` or `run()` respectively
 
-There's no interactive menu, search, or `--param.<name>=<value>` override yet (all present in
-`../java`) — this module is intentionally a work in progress.
+The interactive menu (`InteractiveMenu`) matches `../java`'s: `search <term>`/`s <term>` (text),
+`/<regex>` (regex), `clear`/`c`, `summary`/`full`, and numbered parameter editing for any use case
+that declares `Parameter<T>`s (see `../java/README_SEARCH.md` for the command reference, unchanged
+here). Not yet ported: `--param.<name>=<value>` CLI overrides (`../java`'s `ParameterParser`/
+`BatchExecutor` equivalent).
 
 ## Object mapping
 
 The legacy client examples use the standalone
-[Java Object Mapper](https://github.com/aerospike/java-object-mapper). This SDK has its own
-built-in mapping mechanism instead: implement `RecordMapper<T>` per model class, then register
-every mapper once in `UseCaseCookbookRunner.buildMappers()` via
-`Cluster.setRecordMappingFactory(new DefaultRecordMappingFactory(mappers))` — mirroring the single
-client+mapper pair the legacy runner builds and hands to every use case.
+[Java Object Mapper](https://github.com/aerospike/java-object-mapper). This module uses
+[`aerospike-sdk-mapper-java`](https://github.com/aerospike/aerospike-sdk-mapper-java) instead:
+annotate each model with `@AerospikeRecord(namespace=, set=)`/`@AerospikeKey`, then register one
+`AeroMapper` for the whole run — `AeroMapper.Builder(session).build()` followed by
+`cluster.setRecordMappingFactory(aeroMapper.asMappingFactory())` in `UseCaseCookbookRunner`, before
+the real per-use-case `Session` is created (see that class's javadoc for why a bootstrap `Session`
+is needed first). Every model that has a single mapped Aerospike record type uses this — there are
+no hand-written `RecordMapper<T>` implementations left in this module.
+
+Annotation attributes must be compile-time constants, so every model hardcodes
+`namespace = "test"` rather than reading the `-Ddemo.namespace` JVM system property this repo
+otherwise supports. This only matters if `demo.namespace` is overridden away from `"test"`, which
+no use case here does.
+
+One confirmed library limitation: `AeroRecordMapper`'s 3-arg `fromMap(Map, Key, int)` — the
+overload the SDK's untyped `RecordStream.getFirst(RecordMapper<T>)`/`.pop(...)` call — always
+throws `UnsupportedOperationException`, since the mapper only decodes through the SDK's typed
+query path (which supplies the `RecordReadContext` it needs). This affects any read that comes
+back from an upsert-with-conditional-filter-and-read-back rather than a query; `PlayerMatching`'s
+`findPlayerToAttack`/`setPlayerOnline` hit it and decode the `Record` manually instead (see
+`PlayerMatching.recordToPlayer`).
 
 **Prefer `TypedDataSet<T>`/`TypedKey<T>` over raw `DataSet`/`Key`** wherever a use case actually
 does object mapping (i.e. calls `.object(pojo)` to write, or wants a decoded `T` back on read) —
@@ -62,15 +82,14 @@ The [Java Object Generator](https://github.com/aerospike-examples/java-object-ge
 wired up here (same manual-install gap as `../java`) — sample data is hand-generated with
 `ThreadLocalRandom` instead.
 
-## Expressions: prefer AEL over nested `Exp` builder chains
+## Expressions: AEL, not `Exp`/`MapExp`/`ListExp` builder chains
 
-For simple filter/read expressions, the `Exp`/`MapExp`/`ListExp` fluent builders read fine. Once an
-expression nests more than one or two levels deep (`Exp.let` + several `Exp.def`/`Exp.cond`
-levels), it gets hard to read and easy to mis-nest. This SDK can compile **AEL** (Aerospike
-Expression Language) strings directly wherever an `Exp`/`Expression` is accepted —
-`BinBuilder.selectFrom(String)`/`upsertFrom(String)` parse the string themselves (no separate
-`AelMaterializer` call needed for that path); `AelMaterializer.expressionFromString(Cluster,
-String)` is available if you need a reusable `Expression` object instead (e.g. for `where(...)`).
+Every expression in this module is written as an **AEL** (Aerospike Expression Language) string,
+not the `Exp`/`MapExp`/`ListExp` fluent builder API — nothing in this module builds an `Exp` tree.
+`BinBuilder.selectFrom(String)`/`upsertFrom(String)` (and the other write-side `*From(String)`
+methods) parse an AEL string directly wherever an `Exp`/`Expression` is accepted; `AelMaterializer
+.expressionFromString(Cluster, String)` is available if a reusable `Expression` object is needed
+instead (e.g. for `where(...)`).
 
 `AdvancedExpressions.multipleCommandsInOneOperation` is the reference example — the legacy client's
 4-level `Exp.let`/`Exp.def`/`Exp.cond` chain becomes:
@@ -151,8 +170,8 @@ again — some things really are out of scope, and the difference is empirical, 
 
 ## Known limitations (alpha SDK)
 
-- **No secondary transaction/query API for the interactive menu, search, or CLI parameter
-  overrides yet** — see Setup above.
+- **No CLI parameter overrides yet** (`--param.<name>=<value>`) — see Setup above. The
+  interactive menu and search are implemented.
 - **This cluster's `test` namespace needs `strong-consistency` for real multi-record
   transactions**, same as `../java`. If it isn't configured, `UseCaseCookbookRunner` detects this
   at startup and swaps in `NonTransactionalCapableSession`, which runs `doInTransaction`/

@@ -8,7 +8,7 @@ The design patterns discussed are pertinent to any programming language in which
 | Language / client | Location | Status |
 | --- | --- | --- |
 | Java (legacy client) | [`source/java`](source/java/README.md) | All use cases, interactive menu + search |
-| Java (new SDK, alpha) | [`source/java-sdk`](source/java-sdk/README.md) | All use cases ported; CLI-only so far |
+| Java (new SDK, alpha) | [`source/java-sdk`](source/java-sdk/README.md) | All use cases, interactive menu + search |
 
 More languages (Go, Python legacy client, Python SDK) are planned — see [CLIENT-5234](https://aerospike.atlassian.net/browse/CLIENT-5234).
 
@@ -19,7 +19,7 @@ You'll need access to a running Aerospike cluster to work through these examples
 Several of the use cases below rely on ACID transactions, which Aerospike introduced in version 8 and which require the `test` namespace to be configured with `strong-consistency` (an enterprise feature). To let these demonstrations run on any cluster, each implementation detects at startup whether the cluster/namespace meets that bar; if not, it warns and silently disables the transactional aspects for that run rather than failing outright.
 
 # Use Cases
-There are multiple use cases in this repository, each with a detailed explanation and sample code. Each implementation linked above provides its own way to run and explore them (an interactive menu for `source/java`, a `-uc <name>` CLI flag for `source/java-sdk`) — see that implementation's README for specifics.
+There are multiple use cases in this repository, each with a detailed explanation and sample code. Both implementations linked above provide an interactive menu (with search) as well as a `-uc <name>` CLI flag to run a specific use case — see that implementation's README for specifics.
 
 ## Managing Top level objects in a one-to-many relationship
 Situations where there are two related entities which are associated with one another, with one entity having many instances of the other entity. Both entities have business value in their own right, so one cannot be aggregated (nested) inside the other. For example a Department has Employees, and each Employee belongs to exactly one department. See [Managing One to Many relationships](UseCases/one-to-many-relationships.md)

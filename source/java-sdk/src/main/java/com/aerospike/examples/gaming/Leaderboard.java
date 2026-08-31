@@ -244,7 +244,10 @@ public class Leaderboard implements UseCase {
 
         @SuppressWarnings("unchecked")
         List<String> combined = new ArrayList<>((List<String>) result.getList("combined"));
-        int keyPos = combined.indexOf(mapKey);
+        // mapKey may no longer be present if the player's score changed concurrently between the
+        // caller reading it and this query running (the anchor for the relative-range selector
+        // above is that now-stale score) - treat everything as "higher" rather than fail.
+        int keyPos = Math.max(combined.indexOf(mapKey), 0);
         List<String> lowerPlayersList = new ArrayList<>(combined.subList(0, keyPos));
         List<String> higherPlayersList = new ArrayList<>(combined.subList(keyPos, combined.size()));
 

@@ -49,7 +49,7 @@ A collection of techniques showing advanced use of expressions. Some of these te
 Maintain historical versions of records with point-in-time query capabilities. Demonstrates atomic version creation using transactions and time-based queries using map operations. Objects are assumed to have 2 parts -- a base record which changes frequently and is small, and a details record which is large and changes infrequently.  See [Versioning Records](UseCases/versioning-records.md)
 
 ## Delta Versioning Records
-Maintain an audit trail of record changes using delta records instead of full copies. Detects bin-level changes server-side with expressions, stores who changed what and when, and optionally stores new bin values for record reconstruction. See [Delta Versioning Records](UseCases/versioning-records-delta.md)
+Maintain an audit trail of record changes using delta records instead of full copies. Detects bin-level changes, stores who changed what and when, and optionally stores new bin values for record reconstruction. See [Delta Versioning Records](UseCases/versioning-records-delta.md)
 
 ## Hot Key — Read (Replica Spread)
 Spread read load across identical replica records. Runs baseline (single key) and mitigation (random replica) phases with per-second KEY_BUSY and latency metrics. See [Hot Key — Read (Replica Spread)](UseCases/hot-key-read-replica-spread.md)

@@ -13,9 +13,8 @@ import com.aerospike.examples.setup.model.Account;
 /**
  * SDK port of the legacy {@code SetupDemo} (see ../../java). The legacy version seeds data with
  * the Java Object Generator (Aerospike-independent, not wired up here yet - accounts are hand-built
- * instead) and the Java Object Mapper; here object mapping is done via the SDK's own
- * {@code RecordMapper}/{@code Cluster.setRecordMappingFactory} mechanism (see {@link
- * com.aerospike.examples.setup.model.AccountMapper}, registered in {@code UseCaseCookbookRunner}).
+ * instead) and the Java Object Mapper; here object mapping uses {@code aerospike-sdk-mapper-java}'s
+ * {@code @AerospikeRecord}/{@code @AerospikeKey} annotations on {@link Account} instead.
  * <p/>
  * Uses {@link TypedDataSet} rather than a raw {@code DataSet} so reads decode straight to
  * {@link Account} via the registered mapper ({@link TypedRecordStream#forEachObject}), with no

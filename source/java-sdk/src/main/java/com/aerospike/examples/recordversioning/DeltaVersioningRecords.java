@@ -28,38 +28,15 @@ import com.aerospike.examples.recordversioning.model.TradeBase;
  * ({@code Inserted}/{@code Changed}/{@code Removed}), plus their new values - enough to reconstruct
  * any past version by replaying deltas from version 0 forward.
  * <p/>
- * The legacy version detects these deltas entirely server-side: it snapshots each targeted bin
- * into a temporary bin, applies the caller's operations, then compares before/after using nested
- * conditional write expressions ({@code Exp.cond} combined with {@code MapExp.put}/{@code
- * ListExp.getByIndex}/{@code MapExp.getByValue}, several levels deep). This port computes the
- * before/after diff client-side instead - but, unlike the other client-side fallbacks found
- * elsewhere in this port (all since converted to AEL - see {@code ../../AEL_CANONICAL_REFERENCE.md}
- * and the java-sdk README), this one isn't a case of AEL being able to do it after all:
- * <ul>
- *   <li>The bin-level diff itself ({@code Inserted}/{@code Changed}/{@code Same}) never actually
- *   needed a server-side comparison expression here, temp bins or otherwise: the "new" value for
- *   every touched bin is already known client-side (it's {@code newValues}, supplied by the
- *   caller), so the comparison is a plain {@code Objects.equals} once the "before" value is known -
- *   no expression language required either way.</li>
- *   <li>The one piece that would genuinely benefit from a single atomic call - the {@code versions}
- *   map's "close the entry currently marked -1, open a new one" pointer update - was tried directly
- *   against the canonical AEL reference (not the old wrong reference behind this port's earlier,
- *   unverified conclusions elsewhere) and is a real, confirmed gap, not a syntax mistake this time:
- *   finding the key via a value selector works fine ({@code $.versions.{=-1,}.getKeys()} - note the
- *   trailing comma, needed to make it multi-select per §5, since {@code getKeys()} rejects a
- *   singular selector per §12), but using that discovered key to address a write - either as a map
- *   selector operand ({@code $.versions.{@(${k})}.setTo(...)}) or as a dynamic key in a
- *   {@code putItems} map literal ({@code putItems({${k}: ...})}) - fails with a parameter error
- *   both ways. That matches the canonical reference's own documented constraint, not a guess:
- *   selector operands and collection-literal keys must be static literals, never a bin path, {@code
- *   $}-expression, or {@code let} variable (§4.2, §5). "Find an entry by value, then mutate that
- *   entry" is fundamentally not expressible in one AEL call against this data model.</li>
- * </ul>
- * Net effect: read the live record, compare each caller-supplied bin value against what was there
- * before, and write the changed bins plus the incremented version and updated {@code versions} map
- * in one follow-up call. Same observable behavior as the legacy version (audit trail, point-in-time
- * versions map, reconstruction) in more round trips, and - now that the alternative has actually
- * been tried - not because of an unverified assumption about this SDK build.
+ * Diffing happens client-side: the "new" value for every touched bin is already known (it's
+ * {@code newValues}, supplied by the caller), so the comparison is a plain {@code Objects.equals}
+ * once the "before" value is read back - no expression language needed for that part. The
+ * {@code versions} map's "close the entry currently marked -1, open a new one" pointer update
+ * can't be done as a single AEL call either: it needs a key discovered at runtime via a value
+ * selector ({@code $.versions.{=-1,}.getKeys()}), and selector operands / collection-literal keys
+ * must be static literals (AEL_CANONICAL_REFERENCE.md §4.2, §5) - a discovered key can't then
+ * address a write. Net effect: read the live record, diff, and write the changed bins plus the
+ * incremented version and updated {@code versions} map in one follow-up call.
  */
 public class DeltaVersioningRecords implements UseCase {
 

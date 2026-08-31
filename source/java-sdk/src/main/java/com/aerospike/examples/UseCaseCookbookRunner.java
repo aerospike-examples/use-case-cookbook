@@ -30,10 +30,7 @@ import com.aerospike.mapper.tools.AeroMapper;
  * strong-consistency check - see {@link #detectTransactionSupport}.
  * <p/>
  * Object mapping uses the annotation-driven {@code aerospike-sdk-mapper-java} library (JOM-style
- * {@code @AerospikeRecord}/{@code @AerospikeKey} annotations on each model class), now that that
- * library compiles cleanly against the SDK's {@code stage} branch. Earlier in this port it needed
- * hand-written {@code RecordMapper<T>} implementations per model instead, because the mapper
- * library didn't compile against the SDK build at the time; those are gone now that it's fixed.
+ * {@code @AerospikeRecord}/{@code @AerospikeKey} annotations on each model class).
  * <p/>
  * NOTE: annotation attributes must be compile-time constants, so every model hardcodes
  * {@code namespace = "test"} rather than reading the {@code -Ddemo.namespace} JVM system property
@@ -110,11 +107,7 @@ public class UseCaseCookbookRunner {
         }
     }
 
-    /**
-     * Runs the interactive menu ({@link InteractiveMenu}) when no {@code -uc} option is given.
-     * Mechanical port of ../../java's equivalent block in its own {@code main()} - see
-     * {@code InteractiveMenu}'s javadoc for what changed in the port.
-     */
+    /** Runs the interactive menu ({@link InteractiveMenu}) when no {@code -uc} option is given. */
     private static void runInteractiveMode(Session session) throws Exception {
         InteractiveMenu menu = new InteractiveMenu(session);
         Terminal terminal = TerminalBuilder.terminal();

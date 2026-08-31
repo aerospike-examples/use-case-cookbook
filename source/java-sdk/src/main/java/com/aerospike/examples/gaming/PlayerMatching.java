@@ -266,12 +266,8 @@ public class PlayerMatching implements UseCase {
     }
 
     /**
-     * AEL translation of the legacy filter, verified against a live cluster to return identical
-     * candidate counts to the original {@code Exp} form. One deliberate simplification: the
-     * original also treated a missing {@code beingAttackedBy} bin as eligible ({@code Exp.or(...,
-     * Exp.not(Exp.binExists(...)))}) - that fallback is unreachable in this use case's data model
-     * (every {@code Player} always has the bin, set at creation) and AEL's bin-existence syntax
-     * couldn't be verified against real missing-bin data here, so it's dropped rather than guessed.
+     * Every {@code Player} always has {@code beingAttackedBy} set at creation, so (unlike the
+     * legacy filter) this doesn't need a missing-bin fallback clause.
      */
     private String getPlayerFilter() {
         return String.format(

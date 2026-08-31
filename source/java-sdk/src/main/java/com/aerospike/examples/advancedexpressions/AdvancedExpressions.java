@@ -105,13 +105,8 @@ public class AdvancedExpressions implements UseCase {
 
         multipleCommandsInOneOperation(session);
 
-        // Both the append and the index read-back are AEL. The read-back needed a `:TYPE` suffix
-        // on the path (`$.acc.[0]:INT`) - the server can't infer a scalar read's type from the path
-        // alone, so it must be pinned explicitly (see ../../AEL_CANONICAL_REFERENCE.md, section
-        // 3.3, per Tim Faulkes). Earlier attempts guessed at terminal methods instead
-        // (.get(return: INDEX)/.get(return: VALUE), based on a different, non-canonical grammar
-        // reference) and all failed - the actual fix was a type suffix, not a different terminal.
-        // Verified against a live cluster to return the expected value.
+        // A scalar path read needs an explicit :TYPE suffix (AEL_CANONICAL_REFERENCE.md §3.3) -
+        // the server can't infer the type of a single-element read from the path alone.
         TypedKey<Car> key = cars.id(1);
         session.upsert(key)
                 .bin("acc").listCreate(ListOrder.UNORDERED)
@@ -121,19 +116,12 @@ public class AdvancedExpressions implements UseCase {
                 .execute();
     }
 
-    /**
-     * AEL translation of {@code ListExp.getByValue(EXISTS, ...)}, using the language's {@code
-     * value in $.bin} membership operator (see ../../AEL_CANONICAL_REFERENCE.md, section 8.1) -
-     * verified against a live cluster (full, unsampled diff of matching ids against the Exp
-     * version, not just a count) to return an identical result set. The earlier {@code
-     * .contains(...)}/{@code .{=...}.count()} guesses were wrong syntax (from a non-canonical
-     * grammar reference), not a real capability gap.
-     */
+    /** Membership check via AEL's {@code value in $.bin} operator (AEL_CANONICAL_REFERENCE.md §8.1). */
     private void findCarsWithFeature(Session session, String feature) {
         showCarsMatchingExpression(session, "'" + feature + "' in $.features", 10);
     }
 
-    /** Same {@code in} operator, reversed direction ({@code $.color in [...]}) - same verification. */
+    /** Same operator, reversed direction: {@code $.color in [...]}. */
     private void findCarsWithColors(Session session, List<String> colors) {
         String colorList = colors.stream().map(c -> "\"" + c + "\"").collect(java.util.stream.Collectors.joining(", "));
         showCarsMatchingExpression(session, "$.color in [" + colorList + "]", 10);
@@ -154,8 +142,6 @@ public class AdvancedExpressions implements UseCase {
         System.out.println("Record before augmenting:");
         showCar(1, session.query(key).execute().getFirstRecord());
 
-        // Written as AEL rather than nested Exp.let/Exp.def/Exp.cond builder calls - much easier to
-        // read once the nesting gets this deep, and it's the same expression the server evaluates.
         session.upsert(key)
                 .bin("features").upsertFrom("""
                         let (

@@ -12,14 +12,10 @@ import com.aerospike.client.sdk.Session;
  * already exposes both raw record operations and object mapping. Parameter handling logic is
  * otherwise identical - {@code Parameter<T>} is unchanged between the two modules.
  * <p/>
- * One deliberate deviation from the legacy version: it takes a {@code Scanner} in its
- * constructor instead of creating its own {@code new Scanner(System.in)} per parameter-edit call.
- * The legacy version's per-call {@code Scanner} (compounded by {@code InteractiveMenu}'s own
- * per-loop-iteration {@code Scanner}) silently drops buffered-but-unconsumed input whenever a new
- * {@code Scanner} wraps the same underlying {@code System.in} stream - harmless when a human is
- * typing one line at a time, but it swallows queued commands under any piped/scripted stdin
- * (confirmed while testing this port). Sharing one {@code Scanner} with {@link InteractiveMenu}
- * avoids that.
+ * Takes a {@code Scanner} in its constructor rather than creating its own per parameter-edit
+ * call: a fresh {@code Scanner} wrapping the same {@code System.in} stream silently drops
+ * whatever the previous one had already buffered, which swallows queued commands under piped or
+ * scripted stdin. Sharing one {@code Scanner} with {@link InteractiveMenu} avoids that.
  */
 public class UseCaseExecutor {
 
@@ -154,7 +150,6 @@ public class UseCaseExecutor {
     /**
      * Modifies a single parameter value.
      * @param param The parameter to modify
-     * @param scanner The scanner for user input
      * @return true if the parameter was modified, false if cancelled
      */
     private boolean modifyParameter(Parameter<?> param) {

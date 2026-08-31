@@ -227,16 +227,9 @@ public class Leaderboard implements UseCase {
      * of the player's map key directly, pulling in extra entries from neighboring buckets if the
      * range overflows the current bucket.
      * <p/>
-     * Written as a single AEL relative-range map selector ({@code {-N:N~key}} - see the canonical
-     * reference at ../../AEL_CANONICAL_REFERENCE.md, section 5) rather than the original nested
-     * {@code Exp.let}/{@code Exp.def}/{@code Exp.cond} + two separate {@code MapExp} reads. This
-     * replaces the whole index-lookup-then-clamped-range composition with one read, and the server
-     * clamps automatically at the map's boundaries (no manual {@code startIndex}/{@code count}
-     * clamping needed for the same-bucket portion). Verified against a live cluster with a full
-     * side-by-side diff against the original Exp composition across many buckets - byte-identical
-     * results. The earlier conclusion that this needed unsupported nested-expression selectors was
-     * based on a non-canonical grammar reference; the canonical AEL reference's relative-range
-     * selector form solves it directly.
+     * A single AEL relative-range map selector ({@code {-N:N~key}}, AEL_CANONICAL_REFERENCE.md
+     * §5) does the index-lookup-plus-clamped-range read in one call, with the server clamping
+     * automatically at the map's boundaries.
      */
     public List<Player> getScoresAroundPlayer(Session session, int playerId, int score, int numPlayersEitherSide) {
         String mapKey = getMapKey(playerId, score);

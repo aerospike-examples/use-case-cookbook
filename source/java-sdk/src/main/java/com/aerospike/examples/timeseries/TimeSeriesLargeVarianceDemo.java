@@ -33,23 +33,11 @@ import com.aerospike.examples.timeseries.model.Event;
  * which sub-record(s) it needs, and a write walks it to find which sub-record a new event belongs
  * in (recursing into that sub-record's own split if it, in turn, overflows).
  * <p/>
- * The legacy version does the split-detection-and-removal half of this as a single round-trip
- * conditional CDT write expression ({@code Exp.cond} + {@code MapExp.getByIndexRange}/{@code
- * removeByIndexRange} combined with {@code ExpOperation.write(..., EVAL_NO_FAIL)}) against the
- * bucket record - an earlier pass at this port assumed that wasn't expressible against this alpha
- * SDK build (the same pre-canonical-reference conclusion later found wrong for {@link
- * TimeSeriesDemo}'s device filter) and fell back to a plain read-then-write. Re-checked against
- * the canonical AEL reference and it works: {@link #splitBucket} now does the conditional
- * get-minority-and-remove-it as one {@code operate()} call on the bucket record, same as legacy.
- * One deliberate behavior change from this port's earlier version: the split point is now a fixed
- * item count ({@link #MINOR_SPLIT_ITEMS}, derived from {@code MAX_RECORDS_PER_BUCKET} and {@code
- * PERCENT_EVENTS_IN_ORIG_BUCKET} the same way the legacy version derives it) rather than a
- * percentage of the bucket's current size - AEL selector bounds must be static literals (a
- * computed expression like "count() * 80 / 100" isn't allowed inside {@code {…}}, per the
- * canonical reference §4.2), so a fixed split count is what makes this expressible in one
- * server-side call at all. Observable behavior is effectively identical: a bucket still splits
- * once it crosses {@code MAX_RECORDS_PER_BUCKET}, moving its newest few events to a continuation
- * record.
+ * {@link #splitBucket} detects overflow and removes the minority slice in one {@code operate()}
+ * call against the bucket record. The split point ({@link #MINOR_SPLIT_ITEMS}) is a fixed item
+ * count rather than a percentage of the bucket's current size, because AEL selector bounds must
+ * be static literals - a computed bound like {@code count() * 80 / 100} isn't allowed inside
+ * {@code {…}} (AEL_CANONICAL_REFERENCE.md §4.2).
  */
 public class TimeSeriesLargeVarianceDemo implements UseCase {
 
@@ -264,7 +252,7 @@ public class TimeSeriesLargeVarianceDemo implements UseCase {
      * <p/>
      * The {@code when(...)} condition re-checks the size rather than trusting the caller, because
      * {@link #upsertEvent} calls this right after a separate write that may have raced with
-     * another writer - matching the legacy version's own re-check for the same reason.
+     * another writer.
      */
     @SuppressWarnings("unchecked")
     private void splitBucket(Session session, Key rootKey, Key bucketKey) {
@@ -397,8 +385,7 @@ public class TimeSeriesLargeVarianceDemo implements UseCase {
     /**
      * Reads a bucket's events restricted to an eventId key range, with device filtering (when
      * requested) also pushed down server-side. See {@link TimeSeriesDemo#readFilteredBucket} for
-     * the identical AEL selector-plus-filter derivation and why it replaced the client-side
-     * filtering this port originally used.
+     * the AEL selector-plus-filter derivation.
      */
     private Record readFilteredBucket(Session session, Key key, String earliestEventId, String latestEventId,
             java.util.Set<String> deviceFilter) {

@@ -311,23 +311,14 @@ public class TimeSeriesDemo implements UseCase {
 
     /**
      * Reads a bucket's events restricted to an eventId key range, with device filtering (when
-     * requested) also pushed down server-side.
-     * <p/>
-     * The legacy version's device filter is a nested map expression ({@code
-     * MapExp.getByValueList} over the result of {@code MapExp.getByKeyRange}, matching entries
-     * against a wildcard-tailed {@code [deviceId, *]} value list); an earlier pass at this port
-     * tried the equivalent in raw {@code Exp}/{@code MapExp} builder calls and concluded it wasn't
-     * expressible against this alpha SDK build. Re-checked against the canonical AEL reference
-     * (courtesy of Tim Faulkes - see ../../AEL_CANONICAL_REFERENCE.md §4.4, §5, §7) instead of
-     * that builder API, and it works directly: a map key-range selector chained with a filter
-     * (not a wildcard - {@code &[?(…)]} is the selector-then-filter form in §4.4, not {@code
-     * .*[?(…)]}) against the loop variable's first list element:
-     * {@code $.map.{@'<earliest>':'<latest>'}&[?(@.[0] in ['dev1','dev2'])]}. Verified live: the
-     * filtered read returns exactly the matching {@code [deviceId, eventDetails]} entries, still
-     * in key order (implicit-get on a map-range/filter path returns a flat LIST of values, so no
-     * separate {@code getKeysAndValues()}-style terminal is needed - see {@link
-     * #addEventsToResults}), with zero matches correctly returning an empty list rather than an
-     * error.
+     * requested) also pushed down server-side: a map key-range selector chained with a filter on
+     * the loop variable's first list element (AEL_CANONICAL_REFERENCE.md §4.4's {@code &[?(…)]}
+     * selector-then-filter form, not {@code .*[?(…)]} wildcard iteration, which doesn't combine
+     * with a preceding range selector) - {@code
+     * $.map.{@'<earliest>':'<latest>'}&[?(@.[0] in ['dev1','dev2'])]}. Implicit-get on a map
+     * range/filter path returns a flat, key-ordered LIST of values rather than a map (see {@link
+     * #addEventsToResults}), so no separate keys-and-values terminal is needed; zero matches
+     * returns an empty list.
      */
     private Record readFilteredBucket(Session session, Key key, String earliestEventId, String latestEventId,
             java.util.Set<String> deviceFilter) {

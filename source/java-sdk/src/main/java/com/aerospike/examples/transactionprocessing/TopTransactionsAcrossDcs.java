@@ -27,15 +27,8 @@ import com.aerospike.examples.transactionprocessing.model.Transaction;
  * trimmed on every write. Reading the account's overall top transactions means merging both DC
  * maps and taking the most recent entries across both.
  * <p/>
- * The legacy version merges the two DC maps and takes the top N in one round trip via a nested
- * conditional expression ({@code Exp.cond} + {@code MapExp.putItems} + {@code
- * MapExp.getByIndexRange}); an earlier pass at this port assumed the AEL equivalent wasn't
- * expressible (the same pre-canonical-reference conclusion later found wrong for {@link
- * com.aerospike.examples.timeseries.TimeSeriesDemo}'s device filter) and merged the two maps
- * client-side instead. Re-checked against the canonical AEL reference and it works - see {@link
- * #getTopResults} for the derivation, including the {@code let}-binding needed to select a range
- * on a merged map, and the {@code when}-gated fallback for when one or both DC bins don't exist
- * yet (an account with no transactions in a DC, common early in a run).
+ * See {@link #getTopResults} for how merging the two DC maps and taking the top N is done as a
+ * single AEL read.
  */
 public class TopTransactionsAcrossDcs implements UseCase {
 

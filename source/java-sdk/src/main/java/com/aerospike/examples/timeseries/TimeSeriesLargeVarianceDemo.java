@@ -7,6 +7,7 @@ import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 
@@ -18,10 +19,12 @@ import com.aerospike.client.sdk.ResultCode;
 import com.aerospike.client.sdk.Session;
 import com.aerospike.client.sdk.cdt.ListOrder;
 import com.aerospike.client.sdk.cdt.MapOrder;
+import com.aerospike.client.sdk.query.PreparedAel;
 import com.aerospike.examples.AnsiColors;
 import com.aerospike.examples.UseCase;
 import com.aerospike.examples.timeseries.model.Account;
 import com.aerospike.examples.timeseries.model.Event;
+import com.aerospike.mapper.tools.AeroMapper;
 
 /**
  * SDK port of the legacy {@code TimeSeriesLargeVarianceDemo} (see ../../java). Same bucketed
@@ -33,11 +36,20 @@ import com.aerospike.examples.timeseries.model.Event;
  * which sub-record(s) it needs, and a write walks it to find which sub-record a new event belongs
  * in (recursing into that sub-record's own split if it, in turn, overflows).
  * <p/>
+ * {@link #upsertEvent} tries {@link #tryWriteToRootBlock} first: a single non-transactional,
+ * filtered {@code operate()} call that succeeds without ever opening a transaction as long as the
+ * root block hasn't split and has room - the common case. Only when that filter blocks the write
+ * (root already split, or this write would overflow it) does {@link #upsertEvent} fall back to
+ * {@code doInTransaction} to find or create the right target block, mirroring the legacy client's
+ * {@code filterExp}/{@code failOnFilteredOut=false} write.
+ * <p/>
  * {@link #splitBucket} detects overflow and removes the minority slice in one {@code operate()}
- * call against the bucket record. The split point ({@link #MINOR_SPLIT_ITEMS}) is a fixed item
- * count rather than a percentage of the bucket's current size, because AEL selector bounds must
- * be static literals - a computed bound like {@code count() * 80 / 100} isn't allowed inside
- * {@code {…}} (AEL_CANONICAL_REFERENCE.md §4.2).
+ * call against the bucket record, mixing a conditional read ({@code selectFrom}) and a
+ * conditional write ({@code upsertFrom}) of the same {@code when(...)} condition in a single
+ * round trip rather than reading the whole bucket back to decide client-side. The split point
+ * ({@link #MINOR_SPLIT_ITEMS}) is a fixed item count rather than a percentage of the bucket's
+ * current size, because AEL selector bounds must be static literals - a computed bound like
+ * {@code count() * 80 / 100} isn't allowed inside {@code {…}} (AEL_CANONICAL_REFERENCE.md §4.2).
  */
 public class TimeSeriesLargeVarianceDemo implements UseCase {
 
@@ -93,13 +105,13 @@ public class TimeSeriesLargeVarianceDemo implements UseCase {
     private final DataSet events = DataSet.of(System.getProperty("demo.namespace", "test"), "uccb_events_variance");
 
     @Override
-    public void setup(Session session) throws Exception {
+    public void setup(Session session, AeroMapper mapper) throws Exception {
         session.truncate(events);
         generateSampleData(session);
     }
 
     @Override
-    public void run(Session session) throws Exception {
+    public void run(Session session, AeroMapper mapper) throws Exception {
         demonstrateQueries(session);
     }
 
@@ -184,10 +196,26 @@ public class TimeSeriesLargeVarianceDemo implements UseCase {
     // Writes: insert with adaptive bucket splitting
     // ------------------------------------------------------------------
 
+    /**
+     * Inserts or updates an event in the database.
+     * @param session - The Session used to access the database.
+     * @param event - The event to upsert
+     * @param setExpiry - If this parameter is true, set the TTL of the record. If it's false,
+     * leave the record's existing TTL unchanged.
+     * @throws IllegalArgumentException if event is null or missing required fields
+     */
     public void upsertEvent(Session session, Event event, boolean setExpiry) {
         validateEvent(event);
         Key rootKey = createEventKey(event.getAccountId(), event.getTimestamp().getTime());
 
+        if (tryWriteToRootBlock(session, rootKey, event, setExpiry)) {
+            return;
+        }
+
+        // The fast path above was filtered out - the root block has either already split, or
+        // this write would overflow it - so a transaction (with its extra reads) is genuinely
+        // needed to find or create the right target block. Every other write short-circuits
+        // before ever opening one.
         session.doInTransaction(tx -> {
             List<String> continuation = readContinuationList(tx, rootKey);
             Key targetKey = rootKey;
@@ -203,6 +231,42 @@ public class TimeSeriesLargeVarianceDemo implements UseCase {
                 splitBucket(tx, rootKey, targetKey);
             }
         });
+    }
+
+    /**
+     * The happy path: a single non-transactional {@code operate()} call that inserts the event
+     * into the root block, filtered ({@code where(...)}) to only apply when the root hasn't split
+     * yet and still has room. Returns {@code false} - without writing anything - when the filter
+     * blocks the write, so the caller can fall back to the slower path that finds (or creates) the
+     * correct target block; this mirrors the legacy client's {@code filterExp}/{@code
+     * failOnFilteredOut=false} write, which the port had previously replaced with an
+     * unconditional transaction on every single event.
+     */
+    private boolean tryWriteToRootBlock(Session session, Key rootKey, Event event, boolean setExpiry) {
+        String canWriteToRootAel = String.format(
+                "$.%s.exists() == false and $.%s:MAP.count() < %d",
+                CONTINUATION_BIN, BIN_NAME, MAX_RECORDS_PER_BUCKET);
+        try {
+            var op = session.upsert(rootKey).where(canWriteToRootAel);
+            op = setExpiry ? op.expireRecordAfter(java.time.Duration.ofDays(MAX_DAYS_TO_STORE)) : op.withNoChangeInExpiration();
+            Optional<?> result = op.bin(BIN_NAME).onMapKey(event.getId(), MapOrder.KEY_ORDERED)
+                    .upsert(List.of(event.getDeviceId(), convertEventToMap(event)))
+                    .execute().getFirst();
+            return result.isPresent();
+        }
+        catch (AerospikeException ae) {
+            // Same eviction-disabled namespace gotcha as TimeSeriesDemo - see there for details.
+            if (setExpiry && ae.getResultCode() == ResultCode.FAIL_FORBIDDEN) {
+                if (!expirationWarningShown) {
+                    expirationWarningShown = true;
+                    System.out.println(AnsiColors.YELLOW
+                            + "Note: this namespace does not support record expiration (eviction is disabled) - "
+                            + "events will be written without a TTL." + AnsiColors.RESET);
+                }
+                return tryWriteToRootBlock(session, rootKey, event, false);
+            }
+            throw ae;
+        }
     }
 
     private List<String> readContinuationList(Session session, Key rootKey) {
@@ -294,6 +358,26 @@ public class TimeSeriesLargeVarianceDemo implements UseCase {
         return endTimestamp == null ? new Date().getTime() : endTimestamp;
     }
 
+    /**
+     * Retrieves events for an account between the given date range, starting with the newest (or
+     * oldest, per {@code direction}). If {@code eventId} is passed, results are exclusive of it,
+     * allowing this to be used for pagination.
+     * @param session - The Session used to access the database.
+     * @param accountId - The account identifier
+     * @param startTimestamp - The starting timestamp (inclusive)
+     * @param endTimestamp - The ending timestamp (inclusive)
+     * @param eventId - The event ID to page from (null for most recent). With {@code
+     * SortDirection.DESCENDING} this is the exclusive upper bound (only older events are
+     * returned); with {@code SortDirection.ASCENDING} it's the exclusive lower bound (only newer
+     * events are returned) - i.e. it's always the last event ID seen on the previous page.
+     * @param count - Maximum number of events to retrieve
+     * @param direction - Whether to page backwards from {@code eventId}/{@code endTimestamp}
+     * (DESCENDING, newest-first) or forwards from {@code eventId}/{@code startTimestamp}
+     * (ASCENDING, oldest-first)
+     * @param deviceIds - Optional device IDs to filter by
+     * @return List of events, ordered per {@code direction}
+     * @throws IllegalArgumentException if accountId is null, count is invalid, or the time range is invalid
+     */
     public List<Event> getEventsBetween(Session session, String accountId, Long startTimestamp, Long endTimestamp,
             String eventId, int count, SortDirection direction, String... deviceIds) {
         validateAccountId(accountId);
@@ -374,10 +458,30 @@ public class TimeSeriesLargeVarianceDemo implements UseCase {
         }
     }
 
+    /**
+     * Retrieves events for an account before a specified event ID.
+     * @param session - The Session used to access the database.
+     * @param accountId - The account identifier
+     * @param eventId - The event ID to start from (null for most recent)
+     * @param count - Maximum number of events to retrieve
+     * @param deviceIds - Optional device IDs to filter by
+     * @return List of events sorted by newest first
+     * @throws IllegalArgumentException if accountId is null or count is invalid
+     */
     public List<Event> getEventsBefore(Session session, String accountId, String eventId, int count, String... deviceIds) {
         return getEventsBetween(session, accountId, null, null, eventId, count, SortDirection.DESCENDING, deviceIds);
     }
 
+    /**
+     * Retrieves events for an account after a specified event ID.
+     * @param session - The Session used to access the database.
+     * @param accountId - The account identifier
+     * @param eventId - The event ID to start from (required)
+     * @param count - Maximum number of events to retrieve
+     * @param deviceIds - Optional device IDs to filter by
+     * @return List of events sorted by oldest first
+     * @throws IllegalArgumentException if eventId is null, accountId is null, or count is invalid
+     */
     public List<Event> getEventsAfter(Session session, String accountId, String eventId, int count, String... deviceIds) {
         return getEventsBetween(session, accountId, null, null, eventId, count, SortDirection.ASCENDING, deviceIds);
     }
@@ -385,31 +489,16 @@ public class TimeSeriesLargeVarianceDemo implements UseCase {
     /**
      * Reads a bucket's events restricted to an eventId key range, with device filtering (when
      * requested) also pushed down server-side. See {@link TimeSeriesDemo#readFilteredBucket} for
-     * the AEL selector-plus-filter derivation.
+     * the AEL selector-plus-filter derivation and why bind values go through {@link PreparedAel}.
      */
     private Record readFilteredBucket(Session session, Key key, String earliestEventId, String latestEventId,
             java.util.Set<String> deviceFilter) {
-        StringBuilder ael = new StringBuilder()
-                .append("$.").append(BIN_NAME)
-                .append(".{@'").append(escapeAelLiteral(earliestEventId))
-                .append("':'").append(escapeAelLiteral(latestEventId)).append("'}");
-        if (deviceFilter != null && !deviceFilter.isEmpty()) {
-            ael.append("&[?(@.[0] in [");
-            boolean first = true;
-            for (String deviceId : deviceFilter) {
-                if (!first) {
-                    ael.append(',');
-                }
-                first = false;
-                ael.append('\'').append(escapeAelLiteral(deviceId)).append('\'');
-            }
-            ael.append("])]");
-        }
-        return session.query(key).bin(BIN_NAME).selectFrom(ael.toString()).execute().getFirstRecord();
-    }
-
-    private static String escapeAelLiteral(String s) {
-        return s.replace("'", "\\'");
+        String ael = deviceFilter != null && !deviceFilter.isEmpty()
+                ? PreparedAel.prepare("$." + BIN_NAME + ".{@?0:?1}&[?(@.[0] in ?2)]")
+                        .formValue(earliestEventId, latestEventId, List.copyOf(deviceFilter))
+                : PreparedAel.prepare("$." + BIN_NAME + ".{@?0:?1}")
+                        .formValue(earliestEventId, latestEventId);
+        return session.query(key).bin(BIN_NAME).selectFrom(ael).execute().getFirstRecord();
     }
 
     @SuppressWarnings("unchecked")
@@ -483,6 +572,12 @@ public class TimeSeriesLargeVarianceDemo implements UseCase {
     // Data generation
     // ------------------------------------------------------------------
 
+    /**
+     * Generates a sample event for testing purposes.
+     * @param accountId - The account identifier
+     * @param deviceId - The device identifier
+     * @return A generated event
+     */
     public Event generateSampleEvent(String accountId, String deviceId) {
         long fourteenDaysMs = TimeUnit.DAYS.toMillis(MAX_DAYS_TO_STORE);
         long timestamp = System.currentTimeMillis() - ThreadLocalRandom.current().nextLong(0, fourteenDaysMs);
@@ -510,6 +605,10 @@ public class TimeSeriesLargeVarianceDemo implements UseCase {
         return event;
     }
 
+    /**
+     * Displays a list of events in a formatted manner.
+     * @param events - The list of events to display
+     */
     public static void displayEvents(List<Event> events) {
         for (int i = 0; i < events.size(); i++) {
             Event event = events.get(i);

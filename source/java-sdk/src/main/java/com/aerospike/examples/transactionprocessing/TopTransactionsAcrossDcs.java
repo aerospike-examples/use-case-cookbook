@@ -18,6 +18,7 @@ import com.aerospike.examples.Async;
 import com.aerospike.examples.UseCase;
 import com.aerospike.examples.transactionprocessing.model.Account;
 import com.aerospike.examples.transactionprocessing.model.Transaction;
+import com.aerospike.mapper.tools.AeroMapper;
 
 /**
  * SDK port of the legacy {@code TopTransactionsAcrossDcs} (see ../../java). Transactions can
@@ -58,10 +59,13 @@ public class TopTransactionsAcrossDcs implements UseCase {
         return "https://github.com/aerospike-examples/use-case-cookbook/blob/main/UseCases/top-transactions-across-dcs.md";
     }
 
-    private final TypedDataSet<Account> accounts =
-            TypedDataSet.of(System.getProperty("demo.namespace", "test"), "uccb_account", Account.class);
-    private final TypedDataSet<Transaction> transactions =
-            TypedDataSet.of(System.getProperty("demo.namespace", "test"), "uccb_txn", Transaction.class);
+    private TypedDataSet<Account> accounts;
+    private TypedDataSet<Transaction> transactions;
+
+    private void init(AeroMapper mapper) {
+        accounts = mapper.getTypedDataSet(Account.class);
+        transactions = mapper.getTypedDataSet(Transaction.class);
+    }
 
     public TypedKey<Account> getAccountKey(String id) {
         return accounts.id(id);
@@ -76,7 +80,8 @@ public class TopTransactionsAcrossDcs implements UseCase {
     }
 
     @Override
-    public void setup(Session session) throws Exception {
+    public void setup(Session session, AeroMapper mapper) throws Exception {
+        init(mapper);
         session.truncate(accounts);
         session.truncate(transactions);
 
@@ -97,7 +102,8 @@ public class TopTransactionsAcrossDcs implements UseCase {
     }
 
     @Override
-    public void run(Session session) throws Exception {
+    public void run(Session session, AeroMapper mapper) throws Exception {
+        init(mapper);
         Async.runFor(Duration.ofSeconds(RUNTIME_SECS), async -> {
             AtomicLong totalTxns = new AtomicLong();
             AtomicLong txnCounter = new AtomicLong();

@@ -21,6 +21,7 @@ import com.aerospike.client.sdk.TypedKeyList;
 import com.aerospike.examples.Async;
 import com.aerospike.examples.UseCase;
 import com.aerospike.examples.gaming.model.Player;
+import com.aerospike.mapper.tools.AeroMapper;
 
 /**
  * SDK port of the legacy {@code PlayerMatching} (see ../../java). Reuses {@link Leaderboard}'s
@@ -68,9 +69,13 @@ public class PlayerMatching implements UseCase {
                 + "their opponents 80% of the time. If a player with a shield attacks during a shield, the shield is removed.";
     }
 
-    private final TypedDataSet<Player> players =
-            TypedDataSet.of(System.getProperty("demo.namespace", "test"), "uccb_player", Player.class);
+    private TypedDataSet<Player> players;
     private final DataSet scoreboard = DataSet.of(System.getProperty("demo.namespace", "test"), "scoreboard");
+
+    private void init(AeroMapper mapper) {
+        players = mapper.getTypedDataSet(Player.class);
+        leaderboard.init(mapper);
+    }
 
     private Player randomPlayer(int id) {
         String first = FIRST_NAMES[ThreadLocalRandom.current().nextInt(FIRST_NAMES.length)];
@@ -82,7 +87,8 @@ public class PlayerMatching implements UseCase {
     }
 
     @Override
-    public void setup(Session session) throws Exception {
+    public void setup(Session session, AeroMapper mapper) throws Exception {
+        init(mapper);
         session.truncate(players);
         session.truncate(scoreboard);
 
@@ -95,7 +101,8 @@ public class PlayerMatching implements UseCase {
     }
 
     @Override
-    public void run(Session session) throws Exception {
+    public void run(Session session, AeroMapper mapper) throws Exception {
+        init(mapper);
         testEligibility(session);
 
         System.out.printf("%nLet's play some games!%n");
@@ -140,6 +147,11 @@ public class PlayerMatching implements UseCase {
      * eligible players, then tries each (randomly) with a filtered conditional write that claims
      * them (sets {@code beingAttackedBy}) atomically, retrying with another candidate if the claim
      * fails because the candidate stopped being eligible in the meantime.
+     * @param session - The Session used to access the database.
+     * @param attackerId - The id of the attacker.
+     * @param possibilities - The candidate keys who could be attacked.
+     * @return the player details on someone to attack. The player will already have been locked
+     * for attacking, or empty if none of the candidates were eligible.
      */
     public Optional<Player> findPlayerToAttack(Session session, int attackerId, TypedKeyList<Player> possibilities) {
         String filter = getPlayerFilter();
@@ -192,7 +204,13 @@ public class PlayerMatching implements UseCase {
         return Optional.empty();
     }
 
-    /** Given an attacker, finds a player of similar strength who is available to attack. */
+    /**
+     * Given an attacker, finds a player of similar strength who is available to attack.
+     * @param session - The Session used to access the database.
+     * @param attacker - The attacker who we want to find a match for.
+     * @return the player details on someone to attack. The player will already have been locked
+     * for attacking.
+     */
     public Optional<Player> findPlayerToAttack(Session session, Player attacker) {
         List<Player> similarScores = leaderboard.getScoresAroundPlayer(session, attacker.getId(), attacker.getScore(), 20);
         TypedKeyList<Player> keys = new TypedKeyList<>();
@@ -202,13 +220,27 @@ public class PlayerMatching implements UseCase {
         return findPlayerToAttack(session, attacker.getId(), keys);
     }
 
+    /**
+     * Calculates the new Elo rating for a player after a game.
+     * @param playerRating - The current rating of the player (e.g., 1600).
+     * @param opponentRating - The rating of the opponent (e.g., 1800).
+     * @param score - The actual score of the game for the player: 1 = win, 0 = draw or loss.
+     * @param kFactor - The K-factor used to determine rating volatility (e.g., 20).
+     * @return the new rating of the player after the game, rounded to the nearest integer.
+     */
     public static int calculateNewEloRating(int playerRating, int opponentRating, int score, int kFactor) {
         double expectedScore = 1.0 / (1.0 + Math.pow(10.0, (opponentRating - playerRating) / 400.0));
         double newRating = playerRating + kFactor * (score - expectedScore);
         return (int) Math.round(newRating);
     }
 
-    /** Plays a game between an attacker and a defender, adjusting scores, shield, and leaderboard. */
+    /**
+     * Plays a game between an attacker and a defender, adjusting scores, shield, and leaderboard.
+     * @param session - The Session used to access the database.
+     * @param attacker - The attacker in the game.
+     * @param defender - The defender in the game.
+     * @param showBattle - If true, logs the outcome and score adjustments as the game plays out.
+     */
     public void playGame(Session session, Player attacker, Player defender, boolean showBattle) {
         if (attacker == null || defender == null) {
             return;
@@ -288,6 +320,8 @@ public class PlayerMatching implements UseCase {
      * decodes through the SDK's typed query path (which does supply that context), not an
      * upsert-with-read-back result like {@link #findPlayerToAttack} and {@link #setPlayerOnline}
      * produce.
+     * @param rec - The record read from the database, with the Player bins selected.
+     * @return a Player built from the record's bins.
      */
     private Player recordToPlayer(Record rec) {
         return new Player(rec.getInt("id"), rec.getString("userName"), rec.getString("firstName"),
@@ -298,6 +332,11 @@ public class PlayerMatching implements UseCase {
     /**
      * Sets a player online and returns their details, or {@code null} if {@code isOnline} is true
      * and the player was already online.
+     * @param session - The Session used to access the database.
+     * @param playerId - The player to set online (or offline).
+     * @param isOnline - Whether they should be online or not.
+     * @return the player's details, or {@code null} if {@code isOnline} is true and the player was
+     * already online.
      */
     public Player setPlayerOnline(Session session, int playerId, boolean isOnline) {
         // A where clause of "" applies no filter, so the isOnline/not-isOnline cases don't need
@@ -325,7 +364,12 @@ public class PlayerMatching implements UseCase {
         return player;
     }
 
-    /** Resets a player to offline, no shield, not being attacked. Sets the score too if >= 0. */
+    /**
+     * Resets a player to offline, no shield, not being attacked. Sets the score too if >= 0.
+     * @param session - The Session used to access the database.
+     * @param playerId - The player to reset.
+     * @param score - The score to set on the player. Set negative to leave the score unchanged.
+     */
     public void resetPlayerTo(Session session, int playerId, int score) {
         ChainableOperationBuilder op = session.upsert(getPlayerKey(playerId))
                 .bin("online").setTo(false)
@@ -340,6 +384,9 @@ public class PlayerMatching implements UseCase {
     /**
      * Determines if the player can currently be attacked. Not for real game play - the result
      * could be stale by the time it's returned.
+     * @param session - The Session used to access the database.
+     * @param playerId - The player being tested.
+     * @return {@code true} if the player can be attacked, {@code false} otherwise.
      */
     public boolean canAttackPlayerTest(Session session, int playerId) {
         try {
@@ -351,7 +398,6 @@ public class PlayerMatching implements UseCase {
                 System.out.println("*** Key " + playerId + " does not exist!");
                 return false;
             }
-            result.get().recordOrThrow();
             return true;
         }
         catch (AerospikeException.FilteredException fe) {

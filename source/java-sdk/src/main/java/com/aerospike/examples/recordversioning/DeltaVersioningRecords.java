@@ -6,10 +6,10 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ThreadLocalRandom;
 
+import com.aerospike.client.sdk.AerospikeException;
 import com.aerospike.client.sdk.ChainableOperationBuilder;
 import com.aerospike.client.sdk.Record;
 import com.aerospike.client.sdk.RecordMapper;
@@ -17,26 +17,35 @@ import com.aerospike.client.sdk.Session;
 import com.aerospike.client.sdk.TypedDataSet;
 import com.aerospike.client.sdk.TypedKey;
 import com.aerospike.client.sdk.cdt.MapOrder;
+import com.aerospike.client.sdk.query.PreparedAel;
 import com.aerospike.examples.UseCase;
 import com.aerospike.examples.recordversioning.model.TradeBase;
+import com.aerospike.mapper.tools.AeroMapper;
 
 /**
  * SDK port of the legacy {@code DeltaVersioningRecords} (see ../../java). Same {@link TradeBase}
  * live-record-plus-{@code versions}-map model as {@link VersioningRecords}, but instead of copying
  * the entire prior record to a historical key on every change, each update writes a small
  * <em>delta</em> audit record ({@code id:version}) describing only which bins changed and how
- * ({@code Inserted}/{@code Changed}/{@code Removed}), plus their new values - enough to reconstruct
- * any past version by replaying deltas from version 0 forward.
+ * ({@code Inserted}/{@code Changed}/{@code Same}), plus their new values - enough to reconstruct any
+ * past version by replaying deltas from version 0 forward.
  * <p/>
- * Diffing happens client-side: the "new" value for every touched bin is already known (it's
- * {@code newValues}, supplied by the caller), so the comparison is a plain {@code Objects.equals}
- * once the "before" value is read back - no expression language needed for that part. The
- * {@code versions} map's "close the entry currently marked -1, open a new one" pointer update
- * can't be done as a single AEL call either: it needs a key discovered at runtime via a value
- * selector ({@code $.versions.{=-1,}.getKeys()}), and selector operands / collection-literal keys
- * must be static literals (AEL_CANONICAL_REFERENCE.md §4.2, §5) - a discovered key can't then
- * address a write. Net effect: read the live record, diff, and write the changed bins plus the
- * incremented version and updated {@code versions} map in one follow-up call.
+ * Diffing happens server-side: each touched bin gets a paired {@code when(...)} AEL expression
+ * (read-only, via {@code selectFrom}) alongside its {@code setTo} write in the same {@code operate}
+ * call, so only the small classification label - not the bin's prior value - ever crosses the wire;
+ * the "new" value doesn't need to travel back at all since the caller already supplied it as
+ * {@code newValues}. Status labels use positional keys ({@code s0}, {@code s1}, ...) rather than a
+ * per-bin-name label, since a real bin name plus a suffix can easily exceed Aerospike's 15-character
+ * bin name limit.
+ * <p/>
+ * One piece is still a targeted follow-up call rather than folded into the same round trip: closing
+ * the {@code versions} map's entry currently marked -1 and opening a new one needs a key discovered
+ * at runtime via a value selector ({@code $.versions.{=-1,}.getKeys()}), and selector operands /
+ * collection-literal keys must be static literals (AEL_CANONICAL_REFERENCE.md §4.2, §5) - a
+ * discovered key can't then address a write in that same expression. That selector also throws
+ * (rather than yielding an empty match) when the {@code versions} bin doesn't exist yet, which is
+ * exactly the very-first-delta-for-this-id case - handled by retrying the same diff call without it
+ * (there's no prior -1 entry to discover anyway).
  */
 public class DeltaVersioningRecords implements UseCase {
 
@@ -65,8 +74,11 @@ public class DeltaVersioningRecords implements UseCase {
         return "https://github.com/aerospike-examples/use-case-cookbook/blob/main/UseCases/versioning-records-delta.md";
     }
 
-    private final TypedDataSet<TradeBase> tradeBases =
-            TypedDataSet.of(System.getProperty("demo.namespace", "test"), "uccb_tradebase", TradeBase.class);
+    private TypedDataSet<TradeBase> tradeBases;
+
+    private void init(AeroMapper mapper) {
+        tradeBases = mapper.getTypedDataSet(TradeBase.class);
+    }
 
     private TypedKey<TradeBase> formKey(long id) {
         return tradeBases.id(id);
@@ -77,16 +89,21 @@ public class DeltaVersioningRecords implements UseCase {
     }
 
     @Override
-    public void setup(Session session) throws Exception {
+    public void setup(Session session, AeroMapper mapper) throws Exception {
+        init(mapper);
         session.truncate(tradeBases);
 
         System.out.printf("Generating %,d trades%n", NUM_RECORDS);
-        RecordMapper<TradeBase> mapper = session.getRecordMappingFactory().getMapper(TradeBase.class);
+        RecordMapper<TradeBase> recordMapper = session.getRecordMappingFactory().getMapper(TradeBase.class);
         for (long id = 0; id < NUM_RECORDS; id++) {
             TradeBase trade = randomTradeBase(id);
-            Map<String, Object> initial = mapper.toMap(trade);
+            Map<String, Object> initial = recordMapper.toMap(trade);
             initial.remove("version");
             initial.remove("versions");
+            // ".type" is mapper-injected type-discriminator metadata, not a real trade field - a
+            // bin name containing "." can't be embedded in an AEL path (see statusAel), and
+            // diffing/versioning it wouldn't be meaningful even if it could be.
+            initial.remove(".type");
             updateTradeBaseWithDelta(session, id, System.currentTimeMillis(), "Initial insert", "setup", initial);
         }
     }
@@ -142,6 +159,36 @@ public class DeltaVersioningRecords implements UseCase {
         throw new IllegalStateException("Unsupported bin value type for '" + name + "': " + value.getClass());
     }
 
+    /** A {@code when(...)} AEL expression classifying a bin's prior state against its new value. */
+    private static String statusAel(String binName, Object newValue) {
+        String template = "when($." + binName + ".exists() == false => 'Inserted', "
+                + "$." + binName + " == ?0 => 'Same', default => 'Changed')";
+        return PreparedAel.prepare(template).formValue(newValue);
+    }
+
+    /**
+     * Builds the diff-and-write {@code operate} call: each touched bin gets a positionally-keyed
+     * {@code selectFrom(statusAel(...))} read alongside its {@code setTo} write, plus a read of the
+     * live {@code version} (or -1 if the record is new), and - unless {@code includeCurKey} is
+     * false - the {@code versions} map's current -1-marked key. See the class javadoc for why
+     * {@code includeCurKey} sometimes has to be false.
+     */
+    private ChainableOperationBuilder buildDiffOp(Session tx, TypedKey<TradeBase> key, List<String> binOrder,
+            Map<String, Object> newValues, boolean includeCurKey) {
+        ChainableOperationBuilder op = tx.upsert(key);
+        for (int i = 0; i < binOrder.size(); i++) {
+            String binName = binOrder.get(i);
+            Object newValue = newValues.get(binName);
+            op = op.bin("s" + i).selectFrom(statusAel(binName, newValue));
+            op = setBinFromValue(op, binName, newValue);
+        }
+        op = op.bin("version$old").selectFrom("when($.version.exists() == false => -1, default => $.version)");
+        if (includeCurKey) {
+            op = op.bin("curKey").selectFrom("$.versions.{=-1,}.getKeys()");
+        }
+        return op;
+    }
+
     /**
      * Applies {@code newValues} to the live {@link TradeBase} record at key {@code id}, computes
      * the bin-level delta against its prior state, and writes both the updated live record and a
@@ -149,52 +196,49 @@ public class DeltaVersioningRecords implements UseCase {
      *
      * @return the new version number
      */
-    @SuppressWarnings("unchecked")
     public int updateTradeBaseWithDelta(Session session, long id, long timestamp, String description, String user,
             Map<String, Object> newValues) {
         return session.doInTransactionReturning(tx -> {
             TypedKey<TradeBase> key = formKey(id);
-            Record existing = tx.query(key).execute().getFirstRecord();
 
-            Map<String, Object> before = new HashMap<>();
-            int currentVersion = -1;
-            Map<Long, Long> versions = null;
-            if (existing != null) {
-                before.putAll(existing.bins);
-                currentVersion = existing.getInt("version");
-                versions = (Map<Long, Long>) existing.getMap("versions");
+            List<String> binOrder = newValues.keySet().stream()
+                    .filter(binName -> !PROTECTED_BINS.contains(binName))
+                    .toList();
+
+            Record diffResult;
+            boolean includeCurKey = true;
+            try {
+                diffResult = buildDiffOp(tx, key, binOrder, newValues, true).execute().getFirstRecord();
+            }
+            catch (AerospikeException.BinOpInvalidException e) {
+                includeCurKey = false;
+                diffResult = buildDiffOp(tx, key, binOrder, newValues, false).execute().getFirstRecord();
             }
 
-            long changeTs = timestamp == 0 ? System.currentTimeMillis() : timestamp;
+            long currentVersion = diffResult.getLong("version$old");
+            List<?> curVersionKey = includeCurKey ? diffResult.getList("curKey") : null;
+
             List<Map<String, Object>> changes = new ArrayList<>();
-            ChainableOperationBuilder op = tx.upsert(key);
-            for (Map.Entry<String, Object> entry : newValues.entrySet()) {
-                String binName = entry.getKey();
-                if (PROTECTED_BINS.contains(binName)) {
-                    continue;
-                }
-                Object newValue = entry.getValue();
-                String status = !before.containsKey(binName) ? "Inserted"
-                        : Objects.equals(before.get(binName), newValue) ? "Same" : "Changed";
+            for (int i = 0; i < binOrder.size(); i++) {
+                String binName = binOrder.get(i);
+                String status = diffResult.getString("s" + i);
                 if (!"Same".equals(status)) {
                     Map<String, Object> change = new LinkedHashMap<>();
                     change.put("binName", binName);
                     change.put("status", status);
-                    change.put("newValue", newValue);
+                    change.put("newValue", newValues.get(binName));
                     changes.add(change);
-                    op = setBinFromValue(op, binName, newValue);
                 }
             }
 
-            int newVersion = currentVersion + 1;
-            op = op.bin("version").setTo((long) newVersion).bin("updatedDate").setTo(changeTs);
-            if (versions != null && !versions.isEmpty()) {
-                long mapKeyOfCurrentVersion = versions.entrySet().stream()
-                        .filter(e -> e.getValue() == -1)
-                        .map(Map.Entry::getKey)
-                        .findFirst()
-                        .orElseThrow();
-                op = op.bin("versions").onMapKey(mapKeyOfCurrentVersion, MapOrder.KEY_ORDERED).upsert((long) currentVersion)
+            long changeTs = timestamp == 0 ? System.currentTimeMillis() : timestamp;
+            int newVersion = (int) currentVersion + 1;
+            ChainableOperationBuilder op = tx.upsert(key)
+                    .bin("version").setTo((long) newVersion)
+                    .bin("updatedDate").setTo(changeTs);
+            if (curVersionKey != null && !curVersionKey.isEmpty()) {
+                long mapKeyOfCurrentVersion = ((Number) curVersionKey.get(0)).longValue();
+                op = op.bin("versions").onMapKey(mapKeyOfCurrentVersion, MapOrder.KEY_ORDERED).upsert(currentVersion)
                         .bin("versions").onMapKey(changeTs, MapOrder.KEY_ORDERED).upsert(-1L);
             }
             else {
@@ -214,7 +258,15 @@ public class DeltaVersioningRecords implements UseCase {
         });
     }
 
-    /** Returns all delta records for a trade, from version 0 through its current live version. */
+    /**
+     * Returns all delta records for a trade, from version 0 through its current live version.
+     * Delta records are stored at keys {@code id:0}, {@code id:1}, ...; the live record at
+     * {@code id} holds the current effective state.
+     * @param session - The Session used to access the database.
+     * @param id - The trade identifier.
+     * @return the trade's delta audit records, in version order.
+     * @throws NullPointerException if no live record exists for {@code id}.
+     */
     public List<Record> getAuditTrail(Session session, long id) {
         Record current = session.query(formKey(id)).execute().getFirstRecord();
         int currentVersion = current.getInt("version");
@@ -228,7 +280,16 @@ public class DeltaVersioningRecords implements UseCase {
         return trail;
     }
 
-    /** Reconstructs the bin values of a trade as they existed at {@code targetVersion} by replaying deltas. */
+    /**
+     * Reconstructs the bin values of a trade as they existed at {@code targetVersion} by replaying
+     * deltas from version 0 onward. Each delta's {@code changes} list is replayed in order:
+     * {@code Inserted}/{@code Changed} set bin values, {@code Removed} deletes them.
+     * @param session - The Session used to access the database.
+     * @param id - The trade identifier.
+     * @param targetVersion - The version to reconstruct (inclusive).
+     * @return the reconstructed bin values, as they existed at {@code targetVersion}.
+     * @throws IllegalArgumentException if a required delta record is missing.
+     */
     @SuppressWarnings("unchecked")
     public Map<String, Object> reconstructAtVersion(Session session, long id, int targetVersion) {
         Map<String, Object> reconstructed = new HashMap<>();
@@ -274,7 +335,8 @@ public class DeltaVersioningRecords implements UseCase {
     }
 
     @Override
-    public void run(Session session) throws Exception {
+    public void run(Session session, AeroMapper mapper) throws Exception {
+        init(mapper);
         final long tradeId = 2;
 
         Record rec = session.query(formKey(tradeId)).execute().getFirstRecord();

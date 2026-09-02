@@ -31,13 +31,12 @@ import com.aerospike.mapper.tools.AeroMapper;
  * strong-consistency check - see {@link #detectTransactionSupport}.
  * <p/>
  * Object mapping uses the annotation-driven {@code aerospike-sdk-mapper-java} library (JOM-style
- * {@code @AerospikeRecord}/{@code @AerospikeKey} annotations on each model class).
- * <p/>
- * NOTE: annotation attributes must be compile-time constants, so every model hardcodes
- * {@code namespace = "test"} rather than reading the {@code -Ddemo.namespace} JVM system property
- * this repo otherwise supports - the mapper library has no dynamic per-call namespace override
- * hook. This only matters if someone actually overrides {@code demo.namespace} away from "test",
- * which no use case in this repo currently exercises.
+ * {@code @AerospikeRecord}/{@code @AerospikeKey} annotations on each model class). Every model's
+ * {@code namespace} is a {@code ${demo.namespace:test}} placeholder, which the mapper resolves
+ * against the {@code -Ddemo.namespace} JVM system property (defaulting to {@code "test"}) - this
+ * is why the {@code AeroMapper} built here is passed into every use case's {@code setup}/{@code
+ * run}, so they can derive their {@code TypedDataSet}s via {@code
+ * AeroMapper#getTypedDataSet(Class)} instead of hardcoding namespace/set a second time.
  */
 public class UseCaseCookbookRunner {
 
@@ -110,10 +109,10 @@ public class UseCaseCookbookRunner {
                     : cluster.createSession(Behavior.DEFAULT, NonTransactionalCapableSession::new);
 
             if (cl.hasOption("useCaseName")) {
-                success = executeUseCaseByName(cl.getOptionValue("useCaseName"), session, seedOnly, runOnly);
+                success = executeUseCaseByName(cl.getOptionValue("useCaseName"), session, aeroMapper, seedOnly, runOnly);
             }
             else {
-                runInteractiveMode(session);
+                runInteractiveMode(session, aeroMapper);
             }
         }
         if (!success) {
@@ -122,8 +121,8 @@ public class UseCaseCookbookRunner {
     }
 
     /** Runs the interactive menu ({@link InteractiveMenu}) when no {@code -uc} option is given. */
-    private static void runInteractiveMode(Session session) throws Exception {
-        InteractiveMenu menu = new InteractiveMenu(session);
+    private static void runInteractiveMode(Session session, AeroMapper mapper) throws Exception {
+        InteractiveMenu menu = new InteractiveMenu(session, mapper);
         Terminal terminal = TerminalBuilder.terminal();
         int width = terminal.getWidth();
         if (width == 0) {
@@ -154,7 +153,7 @@ public class UseCaseCookbookRunner {
     }
 
     /** @return {@code true} if the use case was found and completed without throwing. */
-    private static boolean executeUseCaseByName(String useCaseName, Session session, boolean seedOnly, boolean runOnly) throws Exception {
+    private static boolean executeUseCaseByName(String useCaseName, Session session, AeroMapper mapper, boolean seedOnly, boolean runOnly) throws Exception {
         Optional<UseCase> useCaseOpt = UseCaseRegistry.findByName(useCaseName);
         if (useCaseOpt.isEmpty()) {
             List<UseCase> partialMatches = UseCaseRegistry.findAllByPartialName(useCaseName);
@@ -178,11 +177,11 @@ public class UseCaseCookbookRunner {
         try {
             if (!runOnly) {
                 System.out.println("Setting up the data for the use case...");
-                useCase.setup(session);
+                useCase.setup(session, mapper);
             }
             if (!seedOnly) {
                 System.out.println("\nExecuting the use case...");
-                useCase.run(session);
+                useCase.run(session, mapper);
             }
             System.out.println(AnsiColors.GREEN + "\nUse case completed successfully!" + AnsiColors.RESET);
             return true;

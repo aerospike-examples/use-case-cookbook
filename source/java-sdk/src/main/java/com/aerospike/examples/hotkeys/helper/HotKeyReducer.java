@@ -268,7 +268,12 @@ public class HotKeyReducer {
         return operationMap.remove(key);
     }
 
-    /** Synchronous version of {@link #submitAsync}; blocks until the operation completes. */
+    /**
+     * Synchronous version of {@link #submitAsync}; blocks until the operation completes.
+     * @param key - The Aerospike key to operate on.
+     * @param ops - The operations to perform.
+     * @return the Record result once the operation (or its batch) executes.
+     */
     public Record submit(Key key, Operation... ops) {
         try {
             return submitAsync(key, ops).join();
@@ -285,6 +290,9 @@ public class HotKeyReducer {
     /**
      * Submits operations for execution, batching them with other operations for the same key if
      * it's determined to be hot.
+     * @param key - The Aerospike key to operate on.
+     * @param ops - The operations to perform.
+     * @return a future completed with the Record result once the operation (or its batch) executes.
      */
     public CompletableFuture<Record> submitAsync(Key key, Operation... ops) {
         CompletableFuture<Record> myResults = new CompletableFuture<>();
@@ -319,6 +327,11 @@ public class HotKeyReducer {
         return myResults;
     }
 
+    /**
+     * Returns statistics about the reducer's operation - hot key detection effectiveness and
+     * timing accuracy, which can be used to tune the reducer's configuration.
+     * @return a Statistics object containing operational metrics.
+     */
     public Statistics getStatistics() {
         return new Statistics(monitor.hotKeyAccesses.get(), monitor.nonHotKeyAccesses.get(), desiredDelayDuration, actualDelayDurationNs);
     }

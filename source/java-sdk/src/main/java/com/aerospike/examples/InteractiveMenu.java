@@ -7,17 +7,18 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import com.aerospike.client.sdk.Session;
+import com.aerospike.mapper.tools.AeroMapper;
 
 /**
  * Handles the interactive menu system for use case selection and execution.
  * <p/>
  * Port of ../../java's {@code InteractiveMenu} (see {@code README_SEARCH.md} there for the search
  * command reference - it applies unchanged here). The menu/search/formatting logic is entirely
- * client-agnostic; the constructor takes a single {@code Session} (which the SDK already gives
- * object-mapping methods on) instead of the legacy {@code IAerospikeClient}/{@code AeroMapper}
- * pair. It also holds one shared {@code Scanner} for the whole menu session (passed to {@link
- * UseCaseExecutor} too) rather than a fresh one per read - see {@code UseCaseExecutor}'s javadoc
- * for why.
+ * client-agnostic; the constructor takes a {@code Session} plus the registered {@code AeroMapper}
+ * (each use case needs the mapper to derive its own {@code TypedDataSet}s - see {@link
+ * UseCase#setup}) instead of the legacy {@code IAerospikeClient}/{@code AeroMapper} pair. It also
+ * holds one shared {@code Scanner} for the whole menu session (passed to {@link UseCaseExecutor}
+ * too) rather than a fresh one per read - see {@code UseCaseExecutor}'s javadoc for why.
  */
 public class InteractiveMenu {
 
@@ -33,8 +34,8 @@ public class InteractiveMenu {
     /** Whether current search is using regex */
     private boolean isRegexSearch;
 
-    public InteractiveMenu(Session session) {
-        this.executor = new UseCaseExecutor(session, scanner);
+    public InteractiveMenu(Session session, AeroMapper mapper) {
+        this.executor = new UseCaseExecutor(session, mapper, scanner);
         this.filteredUseCases = new ArrayList<>(UseCaseRegistry.getAllUseCases());
     }
 

@@ -3,6 +3,7 @@ package com.aerospike.examples.hotkeys;
 import com.aerospike.client.sdk.Key;
 import com.aerospike.client.sdk.Session;
 import com.aerospike.examples.UseCase;
+import com.aerospike.mapper.tools.AeroMapper;
 
 /**
  * SDK port of the legacy {@code ReadHotKeyUseCase} (see ../../java). Demonstrates a read hot key:
@@ -37,12 +38,12 @@ public class ReadHotKeyUseCase implements UseCase {
     }
 
     @Override
-    public void setup(Session session) throws Exception {
+    public void setup(Session session, AeroMapper mapper) throws Exception {
         HotKeyProductSetup.truncateAndSeed(session, HotKeySimulationParams.REPLICA_COUNT);
     }
 
     @Override
-    public void run(Session session) throws Exception {
+    public void run(Session session, AeroMapper mapper) throws Exception {
         long productId = HotKeySimulationParams.HOT_PRODUCT_ID;
         int numThreads = HotKeySimulationParams.NUM_THREADS;
         int durationSecs = HotKeySimulationParams.DURATION_SECS;

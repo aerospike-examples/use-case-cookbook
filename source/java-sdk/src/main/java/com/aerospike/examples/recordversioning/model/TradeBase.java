@@ -10,7 +10,7 @@ import com.aerospike.mapper.annotations.AerospikeRecord;
 import lombok.Data;
 
 @Data
-@AerospikeRecord(namespace = "test", set = "uccb_tradebase")
+@AerospikeRecord(namespace = "${demo.namespace:test}", set = "uccb_tradebase")
 public class TradeBase {
     @AerospikeKey
     private long id;

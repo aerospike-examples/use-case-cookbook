@@ -3,6 +3,7 @@ package com.aerospike.examples.hotkeys;
 import com.aerospike.client.sdk.Node;
 import com.aerospike.client.sdk.Session;
 import com.aerospike.client.sdk.command.Info;
+import com.aerospike.client.sdk.info.classes.NamespaceDetail;
 
 /**
  * Temporarily sets {@code transaction-pending-limit} on the hot-key namespace via info
@@ -39,22 +40,9 @@ public final class HotKeyPendingLimitScope implements AutoCloseable {
     }
 
     public static int readTransactionPendingLimit(Session session, String namespace) throws Exception {
-        Node[] nodes = session.getCluster().getNodes();
-        if (nodes.length == 0) {
-            throw new IllegalStateException("No Aerospike nodes available");
-        }
-        return parseTransactionPendingLimit(Info.request(nodes[0],
-                "get-config:context=namespace;id=" + namespace));
-    }
-
-    private static int parseTransactionPendingLimit(String configResponse) {
-        for (String part : configResponse.split(";")) {
-            if (part.startsWith("transaction-pending-limit=")) {
-                return Integer.parseInt(part.substring("transaction-pending-limit=".length()));
-            }
-        }
-        throw new IllegalStateException(
-                "transaction-pending-limit not found in namespace config: " + configResponse);
+        NamespaceDetail detail = session.info().namespaceDetails(namespace)
+                .orElseThrow(() -> new IllegalStateException("Namespace not found: " + namespace));
+        return (int) detail.getTransactionPendingLimit();
     }
 
     private static void setTransactionPendingLimit(Session session, String namespace, int pendingLimit)

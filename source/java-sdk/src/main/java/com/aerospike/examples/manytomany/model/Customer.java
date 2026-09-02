@@ -12,7 +12,7 @@ import lombok.NoArgsConstructor;
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
-@AerospikeRecord(namespace = "test", set = "uccb_customer")
+@AerospikeRecord(namespace = "${demo.namespace:test}", set = "uccb_customer")
 public class Customer {
     @AerospikeKey
     private String custId;

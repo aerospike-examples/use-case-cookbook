@@ -18,6 +18,7 @@ import com.aerospike.examples.Async;
 import com.aerospike.examples.UseCase;
 import com.aerospike.examples.recordversioning.model.TradeBase;
 import com.aerospike.examples.recordversioning.model.TradeStaticData;
+import com.aerospike.mapper.tools.AeroMapper;
 
 /**
  * SDK port of the legacy {@code VersioningRecords} (see ../../java). Maintains historical
@@ -63,10 +64,13 @@ public class VersioningRecords implements UseCase {
         return "https://github.com/aerospike-examples/use-case-cookbook/blob/main/UseCases/versioning-records.md";
     }
 
-    private final TypedDataSet<TradeBase> tradeBases =
-            TypedDataSet.of(System.getProperty("demo.namespace", "test"), "uccb_tradebase", TradeBase.class);
-    private final TypedDataSet<TradeStaticData> tradeContents =
-            TypedDataSet.of(System.getProperty("demo.namespace", "test"), "uccb_tradecontent", TradeStaticData.class);
+    private TypedDataSet<TradeBase> tradeBases;
+    private TypedDataSet<TradeStaticData> tradeContents;
+
+    private void init(AeroMapper mapper) {
+        tradeBases = mapper.getTypedDataSet(TradeBase.class);
+        tradeContents = mapper.getTypedDataSet(TradeStaticData.class);
+    }
 
     private <T> TypedKey<T> formKey(TypedDataSet<T> dataSet, long id) {
         return dataSet.id(id);
@@ -77,7 +81,8 @@ public class VersioningRecords implements UseCase {
     }
 
     @Override
-    public void setup(Session session) throws Exception {
+    public void setup(Session session, AeroMapper mapper) throws Exception {
+        init(mapper);
         session.truncate(tradeBases);
         session.truncate(tradeContents);
 
@@ -161,9 +166,18 @@ public class VersioningRecords implements UseCase {
     }
 
     /**
-     * Updates the effective record for {@code id}, first copying it to a new historical version.
-     * All within one transaction.
+     * Updates the effective record for {@code id}, first copying it to a new historical version,
+     * then applying the caller's changes via {@code handler} and bumping {@code version}/{@code
+     * updatedDate}/{@code versions} - all within one transaction.
      *
+     * @param session - The Session used to access the database.
+     * @param dataSet - The TypedDataSet identifying which record type (and hence namespace/set) is
+     * being versioned - {@code tradeBases} or {@code tradeContents}.
+     * @param id - The id of the unversioned (effective) record to update.
+     * @param timestamp - The timestamp of the update (if 0, the current time is used).
+     * @param handler - Given the record as read inside the transaction and a builder already
+     * targeting the effective key, returns that builder extended with the caller's own bin
+     * changes.
      * @return the new version number
      */
     private <T> int updateObjectWithVersion(Session session, TypedDataSet<T> dataSet, long id, long timestamp, ChangeHandler handler) {
@@ -245,7 +259,8 @@ public class VersioningRecords implements UseCase {
     }
 
     @Override
-    public void run(Session session) throws Exception {
+    public void run(Session session, AeroMapper mapper) throws Exception {
+        init(mapper);
         Async.runFor(Duration.ofSeconds(5), async -> {
             async.periodic(Duration.ofMillis(200), () -> {
                 long now = System.nanoTime();

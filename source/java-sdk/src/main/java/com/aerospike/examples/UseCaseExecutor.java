@@ -3,14 +3,16 @@ package com.aerospike.examples;
 import java.util.Scanner;
 
 import com.aerospike.client.sdk.Session;
+import com.aerospike.mapper.tools.AeroMapper;
 
 /**
  * Executes use cases with parameter configuration.
  * <p/>
- * Port of ../../java's {@code UseCaseExecutor}: {@code Session} replaces the legacy
- * {@code IAerospikeClient}/{@code AeroMapper} pair everywhere, since the SDK's {@code Session}
- * already exposes both raw record operations and object mapping. Parameter handling logic is
- * otherwise identical - {@code Parameter<T>} is unchanged between the two modules.
+ * Port of ../../java's {@code UseCaseExecutor}: {@code Session} plus the registered {@code
+ * AeroMapper} replace the legacy {@code IAerospikeClient}/{@code AeroMapper} pair - both are
+ * passed straight through to each use case's {@code setup}/{@code run} (see {@link
+ * UseCase#setup}). Parameter handling logic is otherwise identical - {@code Parameter<T>} is
+ * unchanged between the two modules.
  * <p/>
  * Takes a {@code Scanner} in its constructor rather than creating its own per parameter-edit
  * call: a fresh {@code Scanner} wrapping the same {@code System.in} stream silently drops
@@ -20,10 +22,12 @@ import com.aerospike.client.sdk.Session;
 public class UseCaseExecutor {
 
     private final Session session;
+    private final AeroMapper mapper;
     private final Scanner scanner;
 
-    public UseCaseExecutor(Session session, Scanner scanner) {
+    public UseCaseExecutor(Session session, AeroMapper mapper, Scanner scanner) {
         this.session = session;
+        this.mapper = mapper;
         this.scanner = scanner;
     }
 
@@ -55,11 +59,11 @@ public class UseCaseExecutor {
         try {
             if (!runOnly) {
                 System.out.println("\nSetting up the data for the use case...");
-                useCase.setup(session);
+                useCase.setup(session, mapper);
             }
             if (!seedOnly) {
                 System.out.println("\nExecuting the use case...");
-                useCase.run(session);
+                useCase.run(session, mapper);
             }
             System.out.println(AnsiColors.GREEN + "\nUse case completed successfully!" + AnsiColors.RESET);
             return true;

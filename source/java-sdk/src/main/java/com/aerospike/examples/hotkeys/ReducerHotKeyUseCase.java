@@ -8,6 +8,7 @@ import com.aerospike.client.sdk.Operation;
 import com.aerospike.client.sdk.Session;
 import com.aerospike.examples.UseCase;
 import com.aerospike.examples.hotkeys.helper.HotKeyReducer;
+import com.aerospike.mapper.tools.AeroMapper;
 
 /**
  * SDK port of the legacy {@code ReducerHotKeyUseCase} (see ../../java). Demonstrates programmatic
@@ -51,13 +52,13 @@ public class ReducerHotKeyUseCase implements UseCase {
     }
 
     @Override
-    public void setup(Session session) throws Exception {
+    public void setup(Session session, AeroMapper mapper) throws Exception {
         // Reducer operates on a single key; replicas are not used but primary is seeded cleanly.
         HotKeyProductSetup.truncateAndSeed(session, 1);
     }
 
     @Override
-    public void run(Session session) throws Exception {
+    public void run(Session session, AeroMapper mapper) throws Exception {
         long productId = HotKeySimulationParams.HOT_PRODUCT_ID;
         int numThreads = HotKeySimulationParams.NUM_THREADS;
         int durationSecs = HotKeySimulationParams.DURATION_SECS;

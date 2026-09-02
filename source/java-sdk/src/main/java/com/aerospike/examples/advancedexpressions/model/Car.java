@@ -12,7 +12,7 @@ import lombok.NoArgsConstructor;
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
-@AerospikeRecord(namespace = "test", set = "uccb_car")
+@AerospikeRecord(namespace = "${demo.namespace:test}", set = "uccb_car")
 public class Car {
     public enum BodyType {
         SEDAN, SUV, HATCHBACK, COUPE, CONVERTIBLE, UTE

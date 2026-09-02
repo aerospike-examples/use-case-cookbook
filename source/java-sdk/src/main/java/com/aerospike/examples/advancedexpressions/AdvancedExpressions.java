@@ -12,6 +12,7 @@ import com.aerospike.client.sdk.TypedRecordStream;
 import com.aerospike.client.sdk.cdt.ListOrder;
 import com.aerospike.examples.UseCase;
 import com.aerospike.examples.advancedexpressions.model.Car;
+import com.aerospike.mapper.tools.AeroMapper;
 
 /**
  * SDK port of the legacy {@code AdvancedExpressions} (see ../../java). Not a use case per se but
@@ -58,8 +59,11 @@ public class AdvancedExpressions implements UseCase {
         return "https://github.com/aerospike-examples/use-case-cookbook/blob/main/UseCases/advanced-expressions.md";
     }
 
-    private final TypedDataSet<Car> cars =
-            TypedDataSet.of(System.getProperty("demo.namespace", "test"), "uccb_car", Car.class);
+    private TypedDataSet<Car> cars;
+
+    private void init(AeroMapper mapper) {
+        cars = mapper.getTypedDataSet(Car.class);
+    }
 
     private Car randomCar(int id) {
         int numFeatures = ThreadLocalRandom.current().nextInt(0, 9);
@@ -79,7 +83,8 @@ public class AdvancedExpressions implements UseCase {
     }
 
     @Override
-    public void setup(Session session) throws Exception {
+    public void setup(Session session, AeroMapper mapper) throws Exception {
+        init(mapper);
         session.truncate(cars);
 
         System.out.printf("Generating %,d Cars%n", NUM_CARS);
@@ -89,7 +94,8 @@ public class AdvancedExpressions implements UseCase {
     }
 
     @Override
-    public void run(Session session) throws Exception {
+    public void run(Session session, AeroMapper mapper) throws Exception {
+        init(mapper);
         System.out.println("Find 10 cars which have Sunroofs. The features of the car are stored in the 'features' bin, so this is "
                 + "effectively doing:\n"
                 + "      \"Sunroof\" IN features\n"

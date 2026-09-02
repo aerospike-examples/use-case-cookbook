@@ -14,6 +14,7 @@ import com.aerospike.client.sdk.TypedRecordStream;
 import com.aerospike.examples.UseCase;
 import com.aerospike.examples.onetomany.model.Agent;
 import com.aerospike.examples.onetomany.model.Listing;
+import com.aerospike.mapper.tools.AeroMapper;
 
 /**
  * SDK port of the legacy {@code OneToManyRelationships} (see ../../java). Demonstrates a
@@ -51,10 +52,13 @@ public class OneToManyRelationships implements UseCase {
         return "https://github.com/aerospike-examples/use-case-cookbook/blob/main/UseCases/one-to-many-relationships.md";
     }
 
-    private final TypedDataSet<Agent> agents =
-            TypedDataSet.of(System.getProperty("demo.namespace", "test"), "uccb_agent", Agent.class);
-    private final TypedDataSet<Listing> listings =
-            TypedDataSet.of(System.getProperty("demo.namespace", "test"), "uccb_listing", Listing.class);
+    private TypedDataSet<Agent> agents;
+    private TypedDataSet<Listing> listings;
+
+    private void init(AeroMapper mapper) {
+        agents = mapper.getTypedDataSet(Agent.class);
+        listings = mapper.getTypedDataSet(Listing.class);
+    }
 
     private Agent randomAgent(long agentId) {
         String first = FIRST_NAMES[ThreadLocalRandom.current().nextInt(FIRST_NAMES.length)];
@@ -94,7 +98,8 @@ public class OneToManyRelationships implements UseCase {
     }
 
     @Override
-    public void setup(Session session) throws Exception {
+    public void setup(Session session, AeroMapper mapper) throws Exception {
+        init(mapper);
         session.truncate(agents);
         session.truncate(listings);
 
@@ -119,6 +124,10 @@ public class OneToManyRelationships implements UseCase {
     /**
      * Adds a new listing to an agent inside a transaction: saves the listing, then appends
      * its id to the agent's set-like {@code listings} list.
+     *
+     * @param session - The Session used to access the database.
+     * @param agentId - The id of the agent to add the listing to.
+     * @param listing - The listing to add; its {@code agentId} is set to {@code agentId} before saving.
      */
     public void addListing(Session session, long agentId, Listing listing) {
         listing.setAgentId(agentId);
@@ -133,6 +142,10 @@ public class OneToManyRelationships implements UseCase {
     /**
      * Deletes a listing and removes it from its agent's {@code listings} list, inside a
      * transaction. Returns {@code false} if the listing did not exist.
+     *
+     * @param session - The Session used to access the database.
+     * @param listingId - The id of the listing to delete.
+     * @return {@code true} if the listing was found and deleted, {@code false} otherwise.
      */
     public boolean deleteListing(Session session, String listingId) {
         TypedKey<Listing> listingKey = listings.id(listingId);
@@ -154,6 +167,10 @@ public class OneToManyRelationships implements UseCase {
     /**
      * Retrieves all listings for an agent: reads the agent's {@code listings} id list, then
      * batch-reads every listing referenced by it.
+     *
+     * @param session - The Session used to access the database.
+     * @param agentId - The id of the agent whose listings to retrieve.
+     * @return the agent's listings, or an empty list if the agent doesn't exist or has none.
      */
     public List<Listing> getListings(Session session, long agentId) {
         TypedKey<Agent> agentKey = agents.id(agentId);
@@ -182,7 +199,8 @@ public class OneToManyRelationships implements UseCase {
     }
 
     @Override
-    public void run(Session session) throws Exception {
+    public void run(Session session, AeroMapper mapper) throws Exception {
+        init(mapper);
         long agentId = ThreadLocalRandom.current().nextInt(NUM_AGENTS) + 1;
         System.out.printf("Examining listings for agent %d:%n", agentId);
         List<Listing> listings = getListings(session, agentId);

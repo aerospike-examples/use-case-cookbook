@@ -10,7 +10,7 @@ import lombok.NoArgsConstructor;
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
-@AerospikeRecord(namespace = "test", set = "uccb_txn")
+@AerospikeRecord(namespace = "${demo.namespace:test}", set = "uccb_txn")
 public class Transaction {
     public enum Status {
         APPROVED,

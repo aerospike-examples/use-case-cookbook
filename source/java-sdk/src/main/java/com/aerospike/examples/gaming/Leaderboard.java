@@ -16,6 +16,7 @@ import com.aerospike.client.sdk.cdt.MapOrder;
 import com.aerospike.examples.Async;
 import com.aerospike.examples.UseCase;
 import com.aerospike.examples.gaming.model.Player;
+import com.aerospike.mapper.tools.AeroMapper;
 
 /**
  * SDK port of the legacy {@code Leaderboard} (see ../../java). A scoreboard is stored as a
@@ -66,9 +67,12 @@ public class Leaderboard implements UseCase {
         return "https://github.com/aerospike-examples/use-case-cookbook/blob/main/UseCases/leaderboard.md";
     }
 
-    private final TypedDataSet<Player> players =
-            TypedDataSet.of(System.getProperty("demo.namespace", "test"), "uccb_player", Player.class);
+    private TypedDataSet<Player> players;
     private final DataSet scoreboard = DataSet.of(System.getProperty("demo.namespace", "test"), "scoreboard");
+
+    void init(AeroMapper mapper) {
+        players = mapper.getTypedDataSet(Player.class);
+    }
 
     private Player randomPlayer(int id) {
         String first = FIRST_NAMES[ThreadLocalRandom.current().nextInt(FIRST_NAMES.length)];
@@ -80,7 +84,8 @@ public class Leaderboard implements UseCase {
     }
 
     @Override
-    public void setup(Session session) throws Exception {
+    public void setup(Session session, AeroMapper mapper) throws Exception {
+        init(mapper);
         session.truncate(players);
         session.truncate(scoreboard);
 
@@ -93,7 +98,8 @@ public class Leaderboard implements UseCase {
     }
 
     @Override
-    public void run(Session session) throws Exception {
+    public void run(Session session, AeroMapper mapper) throws Exception {
+        init(mapper);
         Record record = session.query(players.id(1)).execute().getFirstRecord();
         int score = record.getInt("score");
         final int playerId = record.getInt("id");
@@ -188,6 +194,10 @@ public class Leaderboard implements UseCase {
 
     /**
      * Sets the score of the player, both on the player record and the scoreboard's map.
+     * @param session - The Session used to access the database.
+     * @param playerId - The id of the player to update.
+     * @param oldScore - The player's previous score, or negative if this is a new leaderboard entry.
+     * @param newScore - The player's new score.
      */
     public void updatePlayerScore(Session session, int playerId, int oldScore, int newScore) {
         session.doInTransaction(tx -> {
@@ -230,6 +240,14 @@ public class Leaderboard implements UseCase {
      * A single AEL relative-range map selector ({@code {-N:N~key}}, AEL_CANONICAL_REFERENCE.md
      * §5) does the index-lookup-plus-clamped-range read in one call, with the server clamping
      * automatically at the map's boundaries.
+     * <p/>
+     * Returns players with just their {@code id} and {@code score} populated - other details are
+     * not fetched; see {@link #populateFullPlayerDetails} for that.
+     * @param session - The Session used to access the database.
+     * @param playerId - The id of the player to get the scores around.
+     * @param score - The score of that player.
+     * @param numPlayersEitherSide - How many players to return either side.
+     * @return up to {@code 2 * numPlayersEitherSide} players with scores around {@code playerId}'s.
      */
     public List<Player> getScoresAroundPlayer(Session session, int playerId, int score, int numPlayersEitherSide) {
         String mapKey = getMapKey(playerId, score);

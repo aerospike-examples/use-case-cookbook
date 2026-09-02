@@ -21,6 +21,7 @@ import com.aerospike.client.sdk.TypedKeyList;
 import com.aerospike.examples.UseCase;
 import com.aerospike.examples.manytomany.model.Account;
 import com.aerospike.examples.manytomany.model.Customer;
+import com.aerospike.mapper.tools.AeroMapper;
 
 /**
  * SDK port of the legacy {@code ManyToManyRelationships} (see ../../java). Demonstrates a
@@ -58,10 +59,13 @@ public class ManyToManyRelationships implements UseCase {
         return "https://github.com/aerospike-examples/use-case-cookbook/blob/main/UseCases/many-to-many-relationships.md";
     }
 
-    private final TypedDataSet<Account> accounts =
-            TypedDataSet.of(System.getProperty("demo.namespace", "test"), "uccb_account", Account.class);
-    private final TypedDataSet<Customer> customers =
-            TypedDataSet.of(System.getProperty("demo.namespace", "test"), "uccb_customer", Customer.class);
+    private TypedDataSet<Account> accounts;
+    private TypedDataSet<Customer> customers;
+
+    private void init(AeroMapper mapper) {
+        accounts = mapper.getTypedDataSet(Account.class);
+        customers = mapper.getTypedDataSet(Customer.class);
+    }
 
     private Customer randomCustomer(String custId) {
         String first = FIRST_NAMES[ThreadLocalRandom.current().nextInt(FIRST_NAMES.length)];
@@ -83,6 +87,11 @@ public class ManyToManyRelationships implements UseCase {
     /**
      * Adds a new account and updates every owning customer's {@code accounts} list, all inside a
      * transaction. Returns {@code true} if every operation succeeded.
+     *
+     * @param session - The Session used to access the database.
+     * @param account - The account to save.
+     * @param ownerIds - The ids of the customers who own this account.
+     * @return {@code true} if all operations were successful, {@code false} otherwise.
      */
     public boolean addAccount(Session session, Account account, List<String> ownerIds) {
         return session.doInTransactionReturning(tx -> {
@@ -100,7 +109,8 @@ public class ManyToManyRelationships implements UseCase {
     }
 
     @Override
-    public void setup(Session session) throws Exception {
+    public void setup(Session session, AeroMapper mapper) throws Exception {
+        init(mapper);
         session.truncate(accounts);
         session.truncate(customers);
 
@@ -126,6 +136,10 @@ public class ManyToManyRelationships implements UseCase {
      * Determines every customer related to {@code customerId} - i.e. sharing ownership of at
      * least one account - and how many accounts they share. Returns a map of related customer id
      * to shared-account count.
+     *
+     * @param session - The Session used to access the database.
+     * @param customerId - The customer id to find all related customers of.
+     * @return a map of related customer id to the number of accounts they share with {@code customerId}.
      */
     public Map<String, Integer> getRelatedCustomers(Session session, String customerId) {
         Record customerRecord = session.query(customers.id(customerId))
@@ -137,11 +151,7 @@ public class ManyToManyRelationships implements UseCase {
         if (accountIds == null || accountIds.isEmpty()) {
             return Map.of();
         }
-
-        TypedKeyList<Account> accountKeys = new TypedKeyList<>();
-        for (Object accountId : accountIds) {
-            accountKeys.add(accounts.id((String) accountId));
-        }
+        TypedKeyList<Account> accountKeys = accounts.ids(accountIds);
 
         Map<String, Integer> counts = new HashMap<>();
         try (RecordStream stream = session.query(accountKeys).readingOnlyBins("owners").execute().asUntypedRecordStream()) {
@@ -165,6 +175,10 @@ public class ManyToManyRelationships implements UseCase {
     /**
      * Gets the list of account ids related to a customer, or {@code null} if the customer does
      * not exist.
+     *
+     * @param session - The Session used to access the database.
+     * @param customerId - The customer id to find all related accounts of.
+     * @return the account ids related to this customer, or {@code null} if the customer does not exist.
      */
     public List<String> getRelatedAccountIds(Session session, String customerId) {
         Record customerRecord = session.query(customers.id(customerId)).execute().getFirstRecord();
@@ -179,6 +193,10 @@ public class ManyToManyRelationships implements UseCase {
      * Removes the association between a customer and an account, inside a transaction: removes
      * the account id from the customer's {@code accounts} list, then the customer id from the
      * account's {@code owners} list.
+     *
+     * @param session - The Session used to access the database.
+     * @param customerId - The id of the customer to remove the association from.
+     * @param accountId - The id of the account to remove the association from.
      */
     public void removeAssociation(Session session, String customerId, String accountId) {
         session.doInTransaction(tx -> {
@@ -204,6 +222,12 @@ public class ManyToManyRelationships implements UseCase {
         });
     }
 
+    /**
+     * Prints the map of customer relationships to the console.
+     *
+     * @param relationships - A map of related customer id to shared-account count, as returned by
+     * {@link #getRelatedCustomers}.
+     */
     public void displayRelatedCustomers(Map<String, Integer> relationships) {
         System.out.println(" Customer | Count");
         System.out.println("----------+------");
@@ -213,7 +237,8 @@ public class ManyToManyRelationships implements UseCase {
     }
 
     @Override
-    public void run(Session session) throws Exception {
+    public void run(Session session, AeroMapper mapper) throws Exception {
+        init(mapper);
         Map<String, Integer> result = getRelatedCustomers(session, "Cust-1");
         System.out.printf("%nFinding all the customers related to customer 'Cust-1' (%d):%n", result.size());
         displayRelatedCustomers(result);

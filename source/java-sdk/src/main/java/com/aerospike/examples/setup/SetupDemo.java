@@ -9,6 +9,7 @@ import com.aerospike.client.sdk.TypedDataSet;
 import com.aerospike.client.sdk.TypedRecordStream;
 import com.aerospike.examples.UseCase;
 import com.aerospike.examples.setup.model.Account;
+import com.aerospike.mapper.tools.AeroMapper;
 
 /**
  * SDK port of the legacy {@code SetupDemo} (see ../../java). The legacy version seeds data with
@@ -41,8 +42,11 @@ public class SetupDemo implements UseCase {
         return "https://github.com/aerospike-examples/use-case-cookbook/blob/main/UseCases/setup.md";
     }
 
-    private final TypedDataSet<Account> accounts =
-            TypedDataSet.of(System.getProperty("demo.namespace", "test"), "uccb_account", Account.class);
+    private TypedDataSet<Account> accounts;
+
+    private void init(AeroMapper mapper) {
+        accounts = mapper.getTypedDataSet(Account.class);
+    }
 
     private Account randomAccount() {
         String name = FIRST_NAMES[ThreadLocalRandom.current().nextInt(FIRST_NAMES.length)]
@@ -54,7 +58,8 @@ public class SetupDemo implements UseCase {
     }
 
     @Override
-    public void setup(Session session) throws Exception {
+    public void setup(Session session, AeroMapper mapper) throws Exception {
+        init(mapper);
         session.truncate(accounts);
 
         System.out.printf("Generating %,d accounts...%n", NUM_ACCOUNTS);
@@ -66,7 +71,8 @@ public class SetupDemo implements UseCase {
     }
 
     @Override
-    public void run(Session session) throws Exception {
+    public void run(Session session, AeroMapper mapper) throws Exception {
+        init(mapper);
         System.out.println("Query first 100 accounts");
         try (TypedRecordStream<Account> recordStream = session.query(accounts).limit(100).execute()) {
             recordStream.forEachObject(account -> System.out.printf(

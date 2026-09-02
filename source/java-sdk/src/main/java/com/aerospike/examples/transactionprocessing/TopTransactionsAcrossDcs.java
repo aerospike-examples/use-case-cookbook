@@ -173,6 +173,10 @@ public class TopTransactionsAcrossDcs implements UseCase {
      * thing to handle a DC bin not existing yet - {@code $.dc1.putItems($.dc2)} throws if either
      * bin is absent (bin navigation is strict by default, §4.1), which happens for any account
      * that hasn't received a transaction in one or both DCs.
+     * @param session - The Session used to access the database.
+     * @param count - The number of most-recent transactions to return.
+     * @param accountId - The account whose transactions to retrieve.
+     * @return the account's most recent transactions, newest first.
      */
     @SuppressWarnings("unchecked")
     public List<Transaction> getTopResults(Session session, int count, String accountId) {

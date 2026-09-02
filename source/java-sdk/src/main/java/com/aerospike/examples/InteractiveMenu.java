@@ -226,6 +226,10 @@ public class InteractiveMenu {
         }
     }
 
+    /**
+     * Get the longest use case name for formatting.
+     * @return The length of the longest name.
+     */
     private int getLongestUseCaseName() {
         return filteredUseCases.stream()
                 .mapToInt(uc -> uc.getName().length())
@@ -233,6 +237,12 @@ public class InteractiveMenu {
                 .orElse(0);
     }
 
+    /**
+     * Format use case text for display.
+     * @param uc - The use case.
+     * @param summary - Whether to show summary or full description.
+     * @return The formatted text.
+     */
     private String formUseCaseText(UseCase uc, boolean summary) {
         if (summary) {
             return uc.getDescription().split("\\.")[0] + ".";
@@ -244,6 +254,9 @@ public class InteractiveMenu {
 
     /**
      * Wrap text to fit within a specified width. Preserves explicit newlines in the text.
+     * @param text - The text to wrap.
+     * @param width - The maximum width.
+     * @return List of wrapped lines.
      */
     private List<String> wrapText(String text, int width) {
         List<String> lines = new ArrayList<>();
@@ -281,6 +294,12 @@ public class InteractiveMenu {
         return lines;
     }
 
+    /**
+     * Pad a string to the right with spaces.
+     * @param text - The text to pad.
+     * @param width - The target width.
+     * @return The padded string.
+     */
     private String padRight(String text, int width) {
         int extraChars = 0;
         int startIndex = text.indexOf("\033");
@@ -299,16 +318,31 @@ public class InteractiveMenu {
         return repeat(" ", leftPadding) + text + repeat(" ", rightPadding);
     }
 
+    /**
+     * Pad a string to the left with spaces.
+     * @param text - The text to pad.
+     * @param width - The target width.
+     * @return The padded string.
+     */
     private String padLeft(String text, int width) {
         return String.format("%" + width + "s", text);
     }
 
+    /**
+     * Repeat a character a specified number of times.
+     * @param ch - The character to repeat.
+     * @param count - The number of times to repeat.
+     * @return The repeated string.
+     */
     private String repeat(String ch, int count) {
         return ch.repeat(count);
     }
 
     /**
      * Highlight search terms in text.
+     * @param text - The text to highlight.
+     * @param preserveColor - The color to preserve after highlighting.
+     * @return The highlighted text.
      */
     private String highlightSearchTerms(String text, String preserveColor) {
         if (currentSearchTerm == null || currentSearchTerm.trim().isEmpty()) {
@@ -342,6 +376,8 @@ public class InteractiveMenu {
 
     /**
      * Search for use cases that match the given search term.
+     * @param searchTerm - The search term.
+     * @param useRegex - Whether to use regex matching.
      */
     private void searchUseCases(String searchTerm, boolean useRegex) {
         this.currentSearchTerm = searchTerm;
@@ -374,6 +410,12 @@ public class InteractiveMenu {
         }
     }
 
+    /**
+     * Check if a use case matches the search pattern.
+     * @param useCase - The use case to check.
+     * @param pattern - The search pattern.
+     * @return {@code true} if the use case matches.
+     */
     private boolean matchesSearch(UseCase useCase, Pattern pattern) {
         return pattern.matcher(useCase.getName()).find()
                 || pattern.matcher(useCase.getDescription()).find()
@@ -383,6 +425,7 @@ public class InteractiveMenu {
 
     /**
      * Invoke a use case by selection number (1-based).
+     * @param selection - The selection number (1-based).
      */
     private void invokeUseCase(int selection) {
         UseCase uc = filteredUseCases.get(selection - 1);

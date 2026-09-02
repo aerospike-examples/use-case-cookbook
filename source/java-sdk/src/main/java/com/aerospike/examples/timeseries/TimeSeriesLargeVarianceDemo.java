@@ -119,6 +119,11 @@ public class TimeSeriesLargeVarianceDemo implements UseCase {
     // Bucket / event-id helpers (identical logic to TimeSeriesDemo)
     // ------------------------------------------------------------------
 
+    /**
+     * Calculates the bucket offset from the reference date for a given timestamp.
+     * @param timestamp - The timestamp in milliseconds
+     * @return The bucket offset from the reference date
+     */
     public static long getBucketOffset(long timestamp) {
         return (timestamp - DATE_OFFSET_MILLIS) / (MILLIS_PER_HOUR * BUCKET_WIDTH_HOURS);
     }
@@ -282,14 +287,10 @@ public class TimeSeriesLargeVarianceDemo implements UseCase {
         try {
             var op = session.upsert(key);
             op = setExpiry ? op.expireRecordAfter(java.time.Duration.ofDays(MAX_DAYS_TO_STORE)) : op.withNoChangeInExpiration();
-            op.bin(BIN_NAME).onMapKey(event.getId(), MapOrder.KEY_ORDERED)
+            // The map put operation's own result is the bucket's new size - no separate read needed.
+            Record record = op.bin(BIN_NAME).onMapKey(event.getId(), MapOrder.KEY_ORDERED)
                     .upsert(List.of(event.getDeviceId(), convertEventToMap(event)))
-                    .execute();
-
-            // Deliberately a separate call from the write above - requesting a write and a read of
-            // the same bin in one operation returns a multi-result wrapper instead of a plain value
-            // (see the equivalent note in PlayerMatching).
-            Record record = session.upsert(key).bin(BIN_NAME).mapSize().execute().getFirstRecord();
+                    .execute().getFirstRecord();
             return record.getLong(BIN_NAME);
         }
         catch (AerospikeException ae) {

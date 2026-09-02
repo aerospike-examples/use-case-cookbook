@@ -40,6 +40,7 @@ import com.aerospike.mapper.tools.AeroMapper;
  */
 public class UseCaseCookbookRunner {
 
+    /** Supports both interactive menu mode and batch command-line execution. */
     public static void main(String[] args) throws Exception {
         SdkConnector connector = new SdkConnector();
         Options options = connector.getOptions();
@@ -135,6 +136,8 @@ public class UseCaseCookbookRunner {
      * Probes whether the connected cluster/namespace supports multi-record transactions by
      * running a trivial write inside a transaction against a throwaway key. See {@link
      * NonTransactionalCapableSession} for what happens when it doesn't.
+     * @param cluster - The connected Cluster to probe.
+     * @return {@code true} if the cluster/namespace supports multi-record transactions.
      */
     private static boolean detectTransactionSupport(Cluster cluster) {
         DataSet probe = DataSet.of(System.getProperty("demo.namespace", "test"), "uccb_txn_probe");
@@ -202,6 +205,7 @@ public class UseCaseCookbookRunner {
         }
     }
 
+    /** @param options - The parsed CLI options, used to print the usage/help text. */
     private static void usage(Options options) {
         HelpFormatter formatter = new HelpFormatter();
         StringWriter sw = new StringWriter();

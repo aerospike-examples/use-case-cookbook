@@ -2,6 +2,7 @@ package com.aerospike.examples.gaming;
 
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -11,7 +12,6 @@ import com.aerospike.client.sdk.Key;
 import com.aerospike.client.sdk.Record;
 import com.aerospike.client.sdk.Session;
 import com.aerospike.client.sdk.TypedDataSet;
-import com.aerospike.client.sdk.TypedKeyList;
 import com.aerospike.client.sdk.cdt.MapOrder;
 import com.aerospike.examples.Async;
 import com.aerospike.examples.UseCase;
@@ -67,11 +67,11 @@ public class Leaderboard implements UseCase {
         return "https://github.com/aerospike-examples/use-case-cookbook/blob/main/UseCases/leaderboard.md";
     }
 
-    private TypedDataSet<Player> players;
-    private final DataSet scoreboard = DataSet.of(System.getProperty("demo.namespace", "test"), "scoreboard");
+    private TypedDataSet<Player> playersDS;
+    private final DataSet scoreboardDS = DataSet.of(System.getProperty("demo.namespace", "test"), "scoreboard");
 
     void init(AeroMapper mapper) {
-        players = mapper.getTypedDataSet(Player.class);
+        playersDS = mapper.getTypedDataSet(Player.class);
     }
 
     private Player randomPlayer(int id) {
@@ -86,13 +86,13 @@ public class Leaderboard implements UseCase {
     @Override
     public void setup(Session session, AeroMapper mapper) throws Exception {
         init(mapper);
-        session.truncate(players);
-        session.truncate(scoreboard);
+        session.truncate(playersDS);
+        session.truncate(scoreboardDS);
 
         System.out.printf("Generating %,d Players%n", NUM_PLAYERS);
         for (int id = 1; id <= NUM_PLAYERS; id++) {
             Player player = randomPlayer(id);
-            session.upsert(players).object(player).execute();
+            session.upsert(playersDS).object(player).execute();
             updatePlayerScore(session, player.getId(), -1, player.getScore());
         }
     }
@@ -100,7 +100,7 @@ public class Leaderboard implements UseCase {
     @Override
     public void run(Session session, AeroMapper mapper) throws Exception {
         init(mapper);
-        Record record = session.query(players.id(1)).execute().getFirstRecord();
+        Record record = session.query(playersDS.id(1)).execute().getFirstRecord();
         int score = record.getInt("score");
         final int playerId = record.getInt("id");
         showPlayersAroundPlayer(session, playerId, score);
@@ -126,7 +126,7 @@ public class Leaderboard implements UseCase {
 
             async.periodic(Duration.ofMillis(THREAD_UPDATE_PERIOD), NUM_THREADS, () -> {
                 int playerIdToChange = async.rand().nextInt(NUM_PLAYERS - 1) + 2;
-                Record playerRecord = session.query(players.id(playerIdToChange)).execute().getFirstRecord();
+                Record playerRecord = session.query(playersDS.id(playerIdToChange)).execute().getFirstRecord();
                 if (playerRecord != null) {
                     int currentScore = playerRecord.getInt("score");
                     updatePlayerScore(session, playerIdToChange, currentScore, changeScore(currentScore));
@@ -150,9 +150,8 @@ public class Leaderboard implements UseCase {
     }
 
     private List<Player> populateFullPlayerDetails(Session session, List<Player> partialPlayers) {
-        TypedKeyList<Player> keys = new TypedKeyList<>();
-        partialPlayers.forEach(player -> keys.add(players.id(player.getId())));
-        return session.query(keys).execute().toObjectList();
+        List<Integer> ids = partialPlayers.stream().map(Player::getId).toList();
+        return session.query(playersDS.ids(ids)).execute().toObjectList();
     }
 
     public void showPlayersAroundPlayer(Session session, int playerId, int score) {
@@ -177,7 +176,7 @@ public class Leaderboard implements UseCase {
     }
 
     private Key getScoreboardKey(int score) {
-        return scoreboard.id(determineBucketForScore(score));
+        return scoreboardDS.id(determineBucketForScore(score));
     }
 
     private String getMapKey(int playerId, int score) {
@@ -227,7 +226,7 @@ public class Leaderboard implements UseCase {
                 }
             }
             if (oldScore >= 0) {
-                tx.upsert(players.id(playerId)).bin("score").setTo(newScore).execute();
+                tx.upsert(playersDS.id(playerId)).bin("score").setTo(newScore).execute();
             }
         });
     }
@@ -264,8 +263,13 @@ public class Leaderboard implements UseCase {
         List<String> combined = new ArrayList<>((List<String>) result.getList("combined"));
         // mapKey may no longer be present if the player's score changed concurrently between the
         // caller reading it and this query running (the anchor for the relative-range selector
-        // above is that now-stale score) - treat everything as "higher" rather than fail.
-        int keyPos = Math.max(combined.indexOf(mapKey), 0);
+        // above is that now-stale score) - the selector still returns a range centered on where
+        // that key WOULD sort, so a plain indexOf()/-1 check doesn't work: the stale key could
+        // sort anywhere in combined, not just past the end. combined is lexically sorted (a
+        // key-ordered map's key range), so binarySearch's insertion-point fallback (-(ip) - 1)
+        // gives the correct split point in every case, found or not.
+        int searchResult = Collections.binarySearch(combined, mapKey);
+        int keyPos = searchResult >= 0 ? searchResult : -(searchResult + 1);
         List<String> lowerPlayersList = new ArrayList<>(combined.subList(0, keyPos));
         List<String> higherPlayersList = new ArrayList<>(combined.subList(keyPos, combined.size()));
 
@@ -282,7 +286,7 @@ public class Leaderboard implements UseCase {
     private void addOverflowLowerPlayersIfNeeded(Session session, List<String> currentPlayers, int playerBucket, int numPlayersEitherSide) {
         int currentBucket = playerBucket;
         while (currentBucket-- >= 0 && currentPlayers.size() < numPlayersEitherSide) {
-            Record record = session.query(scoreboard.id(currentBucket))
+            Record record = session.query(scoreboardDS.id(currentBucket))
                     .bin(SCOREBOARD_BIN).onMapIndexRange(currentPlayers.size() - numPlayersEitherSide).getKeys()
                     .execute().getFirstRecord();
             if (record != null) {
@@ -296,7 +300,7 @@ public class Leaderboard implements UseCase {
     private void addOverflowHigherPlayersIfNeeded(Session session, List<String> currentPlayers, int playerBucket, int numPlayersEitherSide) {
         int currentBucket = playerBucket;
         while (currentBucket++ <= MAX_BUCKETS && currentPlayers.size() < numPlayersEitherSide + 1) {
-            Record record = session.query(scoreboard.id(currentBucket))
+            Record record = session.query(scoreboardDS.id(currentBucket))
                     .bin(SCOREBOARD_BIN).onMapIndexRange(0, numPlayersEitherSide + 1 - currentPlayers.size()).getKeys()
                     .execute().getFirstRecord();
             if (record != null) {

@@ -3,7 +3,6 @@ package com.aerospike.examples.hotkeys;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import com.aerospike.client.sdk.DataSet;
 import com.aerospike.client.sdk.Key;
 import com.aerospike.client.sdk.Record;
 import com.aerospike.client.sdk.RecordStream;
@@ -19,16 +18,16 @@ public final class HotKeyProductSetup {
     }
 
     public static void truncateAndSeed(Session session, int replicaCount) {
-        DataSet products = HotKeyKeys.PRODUCTS;
-        session.truncate(products);
+        session.truncate(HotKeyKeys.PRODUCTS);
 
         long productId = HotKeySimulationParams.HOT_PRODUCT_ID;
         HotKeyProduct product = new HotKeyProduct(productId, "SKU-1000", "Generic demo product for hot-key simulations", 0);
 
-        // Replica keys use a custom "productId:index" id, not product.getId() - so these are raw bin
-        // writes rather than session.upsert(dataSet).object(product), which derives the key from the
-        // mapper's id() instead.
-        writeProductBins(session, HotKeyKeys.primary(productId), product);
+        // The primary key matches product.getId(), so it can be written via object mapping.
+        session.upsert(HotKeyKeys.PRODUCTS).object(product).execute();
+
+        // Replica keys use a custom "productId:index" id, not product.getId() - object mapping
+        // always derives the key from @AerospikeKey, so these still need raw bin writes.
         for (int i = 0; i < replicaCount; i++) {
             writeProductBins(session, HotKeyKeys.replica(productId, i), product);
         }

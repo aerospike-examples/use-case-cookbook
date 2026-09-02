@@ -2,6 +2,7 @@ package com.aerospike.examples;
 
 import java.io.PrintWriter;
 import java.io.StringWriter;
+import java.util.List;
 import java.util.Optional;
 
 import org.apache.commons.cli.CommandLine;
@@ -66,6 +67,7 @@ public class UseCaseCookbookRunner {
         if (error != null) {
             System.out.println(error);
             usage(options);
+            System.exit(1);
             return;
         }
 
@@ -74,9 +76,18 @@ public class UseCaseCookbookRunner {
         if (runOnly && seedOnly) {
             System.out.println("Both 'runOnly' and 'seedOnly' cannot be specified.");
             usage(options);
+            System.exit(1);
             return;
         }
 
+        if (cl.hasOption("useCaseName") && cl.getOptionValue("useCaseName").isBlank()) {
+            System.out.println("The use case name (-uc) cannot be blank.");
+            usage(options);
+            System.exit(1);
+            return;
+        }
+
+        boolean success = true;
         try (Cluster cluster = connector.connect()) {
             // Bootstrap session used only to construct AeroMapper (no typed operations are
             // performed on it) - setRecordMappingFactory must happen before the real session used
@@ -99,11 +110,14 @@ public class UseCaseCookbookRunner {
                     : cluster.createSession(Behavior.DEFAULT, NonTransactionalCapableSession::new);
 
             if (cl.hasOption("useCaseName")) {
-                executeUseCaseByName(cl.getOptionValue("useCaseName"), session, seedOnly, runOnly);
+                success = executeUseCaseByName(cl.getOptionValue("useCaseName"), session, seedOnly, runOnly);
             }
             else {
                 runInteractiveMode(session);
             }
+        }
+        if (!success) {
+            System.exit(1);
         }
     }
 
@@ -139,15 +153,24 @@ public class UseCaseCookbookRunner {
         }
     }
 
-    private static void executeUseCaseByName(String useCaseName, Session session, boolean seedOnly, boolean runOnly) throws Exception {
+    /** @return {@code true} if the use case was found and completed without throwing. */
+    private static boolean executeUseCaseByName(String useCaseName, Session session, boolean seedOnly, boolean runOnly) throws Exception {
         Optional<UseCase> useCaseOpt = UseCaseRegistry.findByName(useCaseName);
         if (useCaseOpt.isEmpty()) {
-            useCaseOpt = UseCaseRegistry.findByPartialName(useCaseName);
+            List<UseCase> partialMatches = UseCaseRegistry.findAllByPartialName(useCaseName);
+            if (partialMatches.size() == 1) {
+                useCaseOpt = Optional.of(partialMatches.get(0));
+            }
+            else if (partialMatches.size() > 1) {
+                System.err.println("Error: '" + useCaseName + "' matches more than one use case - be more specific:");
+                partialMatches.forEach(uc -> System.err.println("   " + uc.getName()));
+                return false;
+            }
         }
         if (useCaseOpt.isEmpty()) {
             System.err.println("Error: Use case '" + useCaseName + "' not found.");
             listUseCases();
-            return;
+            return false;
         }
 
         UseCase useCase = useCaseOpt.get();
@@ -162,12 +185,14 @@ public class UseCaseCookbookRunner {
                 useCase.run(session);
             }
             System.out.println(AnsiColors.GREEN + "\nUse case completed successfully!" + AnsiColors.RESET);
+            return true;
         }
         catch (Exception e) {
             System.err.println(AnsiColors.RED + "An error occurred during execution of the use case:" + AnsiColors.RESET);
             System.err.println("   Message: " + e.getMessage());
             System.err.println("   Class: " + e.getClass().getName());
             e.printStackTrace();
+            return false;
         }
     }
 

@@ -361,7 +361,12 @@ public class PlayerMatching implements UseCase {
 
     public int testEligibility(Session session) {
         int playerId = 1;
-        int originalScore = session.query(getPlayerKey(1)).execute().getFirstRecord().getInt("score");
+        Record playerRecord = session.query(getPlayerKey(playerId)).execute().getFirstRecord();
+        if (playerRecord == null) {
+            throw new IllegalStateException(
+                    "No player with id " + playerId + " found - run setup() before run()/testEligibility().");
+        }
+        int originalScore = playerRecord.getInt("score");
         System.out.printf("%nTesting eligibility for player %d%n", playerId);
         resetPlayerTo(session, playerId, 590);
         System.out.printf("- Checking player can validly be attacked: %s%n",

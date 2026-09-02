@@ -59,7 +59,7 @@ public class WriteHotKeyUseCase implements UseCase {
                     sideOpIntervalMs);
 
             System.out.printf("Primary record unitsSold after baseline: %d%n",
-                    session.query(primaryKey).execute().getFirstRecord().getInt("unitsSold"));
+                    HotKeyProductSetup.readUnitsSold(session, primaryKey));
 
             HotKeySimulationStats mitigated = simulation.run("Mitigation - random write shard", numThreads,
                     durationSecs, () -> {

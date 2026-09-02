@@ -2,6 +2,7 @@ package com.aerospike.examples;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 import com.aerospike.examples.gaming.Leaderboard;
 import com.aerospike.examples.gaming.PlayerMatching;
@@ -61,14 +62,26 @@ public class UseCaseRegistry {
     }
 
     /**
-     * Find a use case by partial name match (case-insensitive).
+     * Finds every use case whose name contains {@code partialName} (case-insensitive).
      * @param partialName The partial name to search for
-     * @return Optional containing the use case if found
+     * @return All matching use cases, in registry order (may be empty)
      */
-    public static Optional<UseCase> findByPartialName(String partialName) {
+    public static List<UseCase> findAllByPartialName(String partialName) {
         return USE_CASES.stream()
                 .filter(uc -> uc.getName().toLowerCase().contains(partialName.toLowerCase()))
-                .findFirst();
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * Find a use case by partial name match (case-insensitive). Returns empty - rather than an
+     * arbitrary pick - when the partial name matches more than one use case, so callers can warn
+     * about the ambiguity instead of silently running the wrong one.
+     * @param partialName The partial name to search for
+     * @return Optional containing the use case if exactly one match was found
+     */
+    public static Optional<UseCase> findByPartialName(String partialName) {
+        List<UseCase> matches = findAllByPartialName(partialName);
+        return matches.size() == 1 ? Optional.of(matches.get(0)) : Optional.empty();
     }
 
     /**

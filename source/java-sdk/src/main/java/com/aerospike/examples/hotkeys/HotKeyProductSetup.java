@@ -5,6 +5,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import com.aerospike.client.sdk.DataSet;
 import com.aerospike.client.sdk.Key;
+import com.aerospike.client.sdk.Record;
 import com.aerospike.client.sdk.RecordStream;
 import com.aerospike.client.sdk.Session;
 import com.aerospike.examples.hotkeys.model.HotKeyProduct;
@@ -40,6 +41,16 @@ public final class HotKeyProductSetup {
                 .bin("description").setTo(product.getDescription())
                 .bin("unitsSold").setTo((long) product.getUnitsSold())
                 .execute();
+    }
+
+    /** Reads {@code unitsSold} from a single key, failing clearly if the record isn't seeded yet. */
+    public static int readUnitsSold(Session session, Key key) {
+        Record record = session.query(key).execute().getFirstRecord();
+        if (record == null) {
+            throw new IllegalStateException(
+                    "No product record at key " + key + " - run setup() before run().");
+        }
+        return record.getInt("unitsSold");
     }
 
     /**

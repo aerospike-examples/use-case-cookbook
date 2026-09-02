@@ -80,7 +80,7 @@ public class ReducerHotKeyUseCase implements UseCase {
 
             System.out.println("HotKeyReducer statistics: " + reducer.getStatistics());
             System.out.printf("Primary record unitsSold after mitigation: %d%n",
-                    session.query(primaryKey).execute().getFirstRecord().getInt("unitsSold"));
+                    HotKeyProductSetup.readUnitsSold(session, primaryKey));
             System.out.printf("Mitigation successes: %,d (baseline successes: %,d)%n",
                     mitigated.successes(), baseline.successes());
         }

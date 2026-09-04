@@ -138,8 +138,9 @@ public class DeltaVersioningRecords implements UseCase {
     public String getDescription() {
         return "Maintain an audit trail of TradeBase record changes using delta records instead of full copies. "
                 + "The initial insert is recorded as delta version 0 with all bins marked Inserted. Subsequent "
-                + "changes store bin-level deltas (Inserted, Changed, TypeChanged, Removed), including new values, so any past "
-                + "version can be reconstructed by replaying deltas from version 0 forward.";
+                + "changes classify each touched bin as Inserted, Changed, TypeChanged, Removed, or Same, storing only "
+                + "the non-Same entries (with their new values) so any past version can be reconstructed by replaying "
+                + "deltas from version 0 forward.";
     }
 
     @Override

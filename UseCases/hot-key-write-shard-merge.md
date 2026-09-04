@@ -3,7 +3,7 @@
 
 Related patterns: [Read (Replica Spread)](hot-key-read-replica-spread.md) · [Write (HotKeyReducer)](hot-key-write-reducer.md)
 
-[Link to working code](../source/src/main/java/com/aerospike/examples/hotkeys/WriteHotKeyUseCase.java)
+[Link to working code (legacy Java client)](../source/java/src/main/java/com/aerospike/examples/hotkeys/WriteHotKeyUseCase.java) | [Link to working code (Java SDK)](../source/java-sdk/src/main/java/com/aerospike/examples/hotkeys/WriteHotKeyUseCase.java)
 
 ## The Problem
 
@@ -58,7 +58,7 @@ for (Record record : records) {
 }
 ```
 
-The merge logic lives in [HotKeyProductSetup.readMergedUnitsSold](../source/src/main/java/com/aerospike/examples/hotkeys/HotKeyProductSetup.java).
+The merge logic lives in `HotKeyProductSetup.readMergedUnitsSold` ([legacy](../source/java/src/main/java/com/aerospike/examples/hotkeys/HotKeyProductSetup.java) | [Java SDK](../source/java-sdk/src/main/java/com/aerospike/examples/hotkeys/HotKeyProductSetup.java)).
 
 ### Why this works for counters
 

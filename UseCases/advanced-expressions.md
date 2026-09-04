@@ -1,4 +1,8 @@
 # Advanced Expression usage
+[Back to all use cases](../README.md)
+
+[Link to working code (legacy Java client)](../source/java/src/main/java/com/aerospike/examples/advancedexpressions/AdvancedExpressions.java) | [Link to working code (Java SDK)](../source/java-sdk/src/main/java/com/aerospike/examples/advancedexpressions/AdvancedExpressions.java)
+
 ## Use case
 This is a collection of different techniques which can be used to generate very powerful expressions. Aerospike expressions are used for filtering
 record operations, XDR operations and index values, and can also be used to write data to the database or return synthetic values based on a combination of bin values. However they are not necessarily intuitive to use and some powerful operations are hidden within them.

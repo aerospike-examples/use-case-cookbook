@@ -1,7 +1,7 @@
 # Time series data
 [Back to all use cases](../README.md)
 
-[Link to working code](../source/src/main/java/com/aerospike/examples/timeseries/TimeSeriesDemo.java)
+[Link to working code (legacy Java client)](../source/java/src/main/java/com/aerospike/examples/timeseries/TimeSeriesDemo.java) | [Link to working code (Java SDK)](../source/java-sdk/src/main/java/com/aerospike/examples/timeseries/TimeSeriesDemo.java)
 
 ## Use case
 Cameras or other devices record events at random times as stimuli (eg motion) cause events to be generated. These devices are associated with an account, and it is expected than an account will have no more than about 50 devices. Each device will generate multiple events.

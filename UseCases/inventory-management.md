@@ -534,9 +534,9 @@ This use case showcases:
 ## Source Code
 
 Full implementation available at:
-- **Main Class**: [InventoryManagementDemo.java](https://github.com/aerospike-examples/use-case-cookbook/blob/main/source/src/main/java/com/aerospike/examples/inventory/InventoryManagementDemo.java)
-- **Product Model**: [Product.java](https://github.com/aerospike-examples/use-case-cookbook/blob/main/source/src/main/java/com/aerospike/examples/inventory/model/Product.java)
-- **Transaction Model**: [InventoryTransaction.java](https://github.com/aerospike-examples/use-case-cookbook/blob/main/source/src/main/java/com/aerospike/examples/inventory/model/InventoryTransaction.java)
+- **Main Class**: [InventoryManagementDemo.java](https://github.com/aerospike-examples/use-case-cookbook/blob/main/source/java/src/main/java/com/aerospike/examples/inventory/InventoryManagementDemo.java)
+- **Product Model**: [Product.java](https://github.com/aerospike-examples/use-case-cookbook/blob/main/source/java/src/main/java/com/aerospike/examples/inventory/model/Product.java)
+- **Transaction Model**: [InventoryTransaction.java](https://github.com/aerospike-examples/use-case-cookbook/blob/main/source/java/src/main/java/com/aerospike/examples/inventory/model/InventoryTransaction.java)
 
 ## Additional Resources
 

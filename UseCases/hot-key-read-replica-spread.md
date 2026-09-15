@@ -3,7 +3,7 @@
 
 Related patterns: [Write (Shard + Merge)](hot-key-write-shard-merge.md) · [Write (HotKeyReducer)](hot-key-write-reducer.md)
 
-[Link to working code (legacy Java client)](../source/java/src/main/java/com/aerospike/examples/hotkeys/ReadHotKeyUseCase.java) | [Link to working code (Java SDK)](../source/java-sdk/src/main/java/com/aerospike/examples/hotkeys/ReadHotKeyUseCase.java)
+[Link to working code (legacy Java client)](../source/java/src/main/java/com/aerospike/examples/hotkeys/ReadHotKeyUseCase.java) | [Link to working code (Java SDK)](../source/java-sdk/src/main/java/com/aerospike/examples/hotkeys/ReadHotKeyUseCase.java) | [Link to working code (Python SDK)](../source/python-sdk/usecasecookbook/hotkeys/read_hot_key.py)
 
 ## The Problem
 

@@ -1,0 +1,13 @@
+"""ANSI escape codes for console formatting, mirroring ../../java-sdk's AnsiColors."""
+
+RESET = "\033[0m"
+BOLD = "\033[1m"
+REVERSE = "\033[7m"
+RED = "\033[31m"
+GREEN = "\033[32m"
+YELLOW = "\033[33m"
+CYAN = "\033[36m"
+MEDIUM_GRAY = "\033[90m"
+HIGHLIGHT = "\033[43;30m"
+COLOR1 = "\033[37m"
+COLOR2 = "\033[97m"

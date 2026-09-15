@@ -3,7 +3,7 @@
 
 Related pattern: [Delta Versioning Records (audit trail)](versioning-records-delta.md)
 
-[Link to working code (legacy Java client)](../source/java/src/main/java/com/aerospike/examples/recordversioning/VersioningRecords.java) | [Link to working code (Java SDK)](../source/java-sdk/src/main/java/com/aerospike/examples/recordversioning/VersioningRecords.java)
+[Link to working code (legacy Java client)](../source/java/src/main/java/com/aerospike/examples/recordversioning/VersioningRecords.java) | [Link to working code (Java SDK)](../source/java-sdk/src/main/java/com/aerospike/examples/recordversioning/VersioningRecords.java) | [Link to working code (Python SDK)](../source/python-sdk/usecasecookbook/recordversioning/versioning_records.py)
 
 This document describes the **full version copy** pattern for point-in-time queries on `TradeBase` and associated `TradeStaticData`. For an audit-trail pattern that stores bin-level deltas instead of full copies, see [Delta Versioning Records](versioning-records-delta.md).
 

@@ -7,8 +7,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 A collection of runnable Java examples ("use cases") showing how to model and solve hard problems with Aerospike (one-to-many/many-to-many relationships, leaderboards, player matching, time series, hot keys, record versioning, cross-DC transaction merging, advanced expressions, etc.). Each use case has a paired markdown doc in `UseCases/` explaining the design decisions, data model, and AQL examples. Design patterns are language-agnostic; the code itself is Java, ported across two independent implementations:
 - **`source/java`** — the legacy Java client (`com.aerospike:aerospike-client`). Everything below in this file describes this module unless noted otherwise.
 - **`source/java-sdk`** — a port of the same use cases onto Aerospike's new Java SDK (`com.aerospike:aerospike-client-sdk`, currently alpha). It differs from `source/java` in several ways called out where relevant below; see [`source/java-sdk/README.md`](source/java-sdk/README.md) for the full picture (setup, object mapping via `aerospike-sdk-mapper-java`, AEL instead of `Exp`/`MapExp`/`ListExp` builder chains, known alpha-SDK limitations).
+- **`source/python-sdk`** — the same use cases again, this time in Python against Aerospike's new Python SDK (`aerospike-sdk` on PyPI, currently alpha). It has its own `UseCase`/registry/`Parameter`/interactive-menu framework mirroring `source/java`'s shape, but no object mapper at all (models are plain dataclasses with hand-written `to_bins`/`from_bins`) and its own AEL dialect with different gaps than the Java SDK's — see [`source/python-sdk/README.md`](source/python-sdk/README.md) for the full picture.
 
-Each module is a self-contained Maven project — `cd source/java` or `cd source/java-sdk` before running any Maven command for that module.
+Each module is a self-contained project (Maven for the two Java modules, `pip`/`venv` for `source/python-sdk`) — `cd` into the module's directory before running any build/run command for it.
 
 ## Build & run
 

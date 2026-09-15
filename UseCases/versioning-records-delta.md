@@ -3,7 +3,7 @@
 
 Related pattern: [Versioning Records (full copy, point-in-time queries)](versioning-records.md)
 
-[Link to working code (legacy Java client)](../source/java/src/main/java/com/aerospike/examples/recordversioning/DeltaVersioningRecords.java) | [Link to working code (Java SDK)](../source/java-sdk/src/main/java/com/aerospike/examples/recordversioning/DeltaVersioningRecords.java)
+[Link to working code (legacy Java client)](../source/java/src/main/java/com/aerospike/examples/recordversioning/DeltaVersioningRecords.java) | [Link to working code (Java SDK)](../source/java-sdk/src/main/java/com/aerospike/examples/recordversioning/DeltaVersioningRecords.java) | [Link to working code (Python SDK)](../source/python-sdk/usecasecookbook/recordversioning/delta_versioning_records.py)
 
 ## Use Case
 

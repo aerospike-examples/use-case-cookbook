@@ -9,8 +9,9 @@ The design patterns discussed are pertinent to any programming language in which
 | --- | --- | --- |
 | Java (legacy client) | [`source/java`](source/java/README.md) | All use cases, interactive menu + search |
 | Java (new SDK, alpha) | [`source/java-sdk`](source/java-sdk/README.md) | All use cases, interactive menu + search |
+| Python (new SDK, alpha) | [`source/python-sdk`](source/python-sdk/README.md) | All use cases, interactive menu + search |
 
-More languages (Go, Python legacy client, Python SDK) are planned — see [CLIENT-5234](https://aerospike.atlassian.net/browse/CLIENT-5234).
+More languages (Go, Python legacy client) are planned — see [CLIENT-5234](https://aerospike.atlassian.net/browse/CLIENT-5234).
 
 Each implementation seeds and reads the same namespace/set/bin names for a given use case, so the AQL examples in a `UseCases/*.md` doc stay accurate regardless of which language you ran to seed the data. Follow the linked README for the language you want to explore before working through the use cases below.
 

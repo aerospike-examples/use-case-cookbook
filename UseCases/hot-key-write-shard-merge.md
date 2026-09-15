@@ -3,7 +3,7 @@
 
 Related patterns: [Read (Replica Spread)](hot-key-read-replica-spread.md) · [Write (HotKeyReducer)](hot-key-write-reducer.md)
 
-[Link to working code (legacy Java client)](../source/java/src/main/java/com/aerospike/examples/hotkeys/WriteHotKeyUseCase.java) | [Link to working code (Java SDK)](../source/java-sdk/src/main/java/com/aerospike/examples/hotkeys/WriteHotKeyUseCase.java)
+[Link to working code (legacy Java client)](../source/java/src/main/java/com/aerospike/examples/hotkeys/WriteHotKeyUseCase.java) | [Link to working code (Java SDK)](../source/java-sdk/src/main/java/com/aerospike/examples/hotkeys/WriteHotKeyUseCase.java) | [Link to working code (Python SDK)](../source/python-sdk/usecasecookbook/hotkeys/write_hot_key.py)
 
 ## The Problem
 

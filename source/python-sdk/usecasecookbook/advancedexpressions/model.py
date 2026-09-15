@@ -6,7 +6,7 @@ represented as.
 """
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List
+from typing import Any
 
 
 @dataclass
@@ -20,9 +20,9 @@ class Car:
     color: str
     milage: int
     price: int
-    features: List[str] = field(default_factory=list)
+    features: list[str] = field(default_factory=list)
 
-    def to_bins(self) -> Dict[str, Any]:
+    def to_bins(self) -> dict[str, Any]:
         return {
             "id": self.id,
             "make": self.make,
@@ -37,7 +37,7 @@ class Car:
         }
 
     @staticmethod
-    def from_bins(bins: Dict[str, Any]) -> "Car":
+    def from_bins(bins: dict[str, Any]) -> "Car":
         return Car(
             id=bins["id"],
             make=bins["make"],

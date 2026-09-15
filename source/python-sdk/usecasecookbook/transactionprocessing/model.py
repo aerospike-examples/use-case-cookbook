@@ -6,18 +6,18 @@ bins directly (see top_transactions_across_dcs.py), not modeled as dataclass fie
 """
 
 from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from typing import Any
 
 
 @dataclass
 class Account:
     id: str
 
-    def to_bins(self) -> Dict[str, Any]:
+    def to_bins(self) -> dict[str, Any]:
         return {"id": self.id}
 
     @staticmethod
-    def from_bins(bins: Dict[str, Any]) -> "Account":
+    def from_bins(bins: dict[str, Any]) -> "Account":
         return Account(id=bins["id"])
 
 
@@ -28,11 +28,11 @@ class Transaction:
     amount: int
     desc: str
     status: str
-    origin: Optional[str]
+    origin: str | None
     approval_code: str
     account_id: str
 
-    def to_bins(self) -> Dict[str, Any]:
+    def to_bins(self) -> dict[str, Any]:
         return {
             "id": self.id,
             "timestamp": self.timestamp,
@@ -45,7 +45,7 @@ class Transaction:
         }
 
     @staticmethod
-    def from_bins(bins: Dict[str, Any]) -> "Transaction":
+    def from_bins(bins: dict[str, Any]) -> "Transaction":
         return Transaction(
             id=bins["id"],
             timestamp=bins["timestamp"],

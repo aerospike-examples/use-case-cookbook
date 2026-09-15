@@ -16,8 +16,7 @@ not, in one round trip.
 """
 
 import random
-from datetime import datetime
-from typing import List, Optional
+from datetime import datetime, timezone
 
 from aerospike_async import Key
 from aerospike_async.exceptions import ResultCode
@@ -141,8 +140,8 @@ class PlayerMatching(UseCase):
         self.set_player_online(session, player1.id, False)
 
     def find_player_to_attack_by_keys(
-        self, session: SyncSession, attacker_id: int, possibilities: List[Key],
-    ) -> Optional[Player]:
+        self, session: SyncSession, attacker_id: int, possibilities: list[Key],
+    ) -> Player | None:
         """Finds a player to attack from a list of candidate keys: batch-reads them
         filtered down to eligible players, then tries each (randomly) with a filtered
         conditional write that claims them (sets ``beingAttackedBy``) atomically,
@@ -185,7 +184,7 @@ class PlayerMatching(UseCase):
                 return Player.from_bins(row.record.bins)
         return None
 
-    def find_player_to_attack(self, session: SyncSession, attacker: Player) -> Optional[Player]:
+    def find_player_to_attack(self, session: SyncSession, attacker: Player) -> Player | None:
         """Given an attacker, finds a player of similar strength who is available to
         attack. The player will already have been locked for attacking.
         """
@@ -210,7 +209,7 @@ class PlayerMatching(UseCase):
         if random.randint(0, 100) >= probability_of_winning:
             attacker.score = calculate_new_elo_rating(attacker.score, defender.score, 1, 20)
             defender.score = calculate_new_elo_rating(defender.score, attacker.score, 0, 20)
-            defender.shield_expiry = int(datetime.now().timestamp() * 1000) + SHIELD_DURATION_MS
+            defender.shield_expiry = int(datetime.now(timezone.utc).timestamp() * 1000) + SHIELD_DURATION_MS
             if show_battle:
                 print(
                     f"VICTORIOUS! (attacker: {original_attacker_score:,} -> {attacker.score:,}, "
@@ -251,13 +250,13 @@ class PlayerMatching(UseCase):
         """Every ``Player`` always has ``beingAttackedBy`` set at creation, so (unlike
         the legacy filter) this doesn't need a missing-bin fallback clause.
         """
-        now_ms = int(datetime.now().timestamp() * 1000)
+        now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
         return f"$.online == false and $.shieldExpiry < {now_ms} and $.beingAttackedBy == '' and $.score > 400"
 
     def get_player_key(self, id: int) -> Key:
         return PLAYERS.id(id)
 
-    def set_player_online(self, session: SyncSession, player_id: int, is_online: bool) -> Optional[Player]:
+    def set_player_online(self, session: SyncSession, player_id: int, is_online: bool) -> Player | None:
         """Sets a player online and returns their details, or ``None`` if ``is_online``
         is true and the player was already online.
         """

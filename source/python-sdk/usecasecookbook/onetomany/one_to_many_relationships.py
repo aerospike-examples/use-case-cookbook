@@ -9,8 +9,7 @@ no strong-consistency namespace).
 """
 
 import random
-from datetime import datetime, timedelta
-from typing import List
+from datetime import datetime, timedelta, timezone
 
 from aerospike_async import ListReturnType
 from aerospike_sdk import DataSet, SyncSession
@@ -37,7 +36,7 @@ def _random_agent(agent_id: int) -> Agent:
     first = random.choice(FIRST_NAMES)
     last = random.choice(LAST_NAMES)
     ten_years = timedelta(days=10 * 365)
-    reg_date = datetime.now() - timedelta(seconds=random.uniform(0, ten_years.total_seconds()))
+    reg_date = datetime.now(timezone.utc) - timedelta(seconds=random.uniform(0, ten_years.total_seconds()))
     return Agent(
         agent_id, first, last,
         f"{first.lower()}.{last.lower()}@example.com",
@@ -48,7 +47,7 @@ def _random_agent(agent_id: int) -> Agent:
 
 def _random_listing(listing_id: str) -> Listing:
     one_year = timedelta(days=365)
-    date_listed = datetime.now() - timedelta(seconds=random.uniform(0, one_year.total_seconds()))
+    date_listed = datetime.now(timezone.utc) - timedelta(seconds=random.uniform(0, one_year.total_seconds()))
     return Listing(
         listing_id,
         f"{random.randint(100, 9999)} {random.choice(STREETS)}",
@@ -114,12 +113,12 @@ def delete_listing(session: SyncSession, listing_id: str) -> bool:
     return run_in_transaction(session, _op)
 
 
-def get_listings(session: SyncSession, agent_id: int) -> List[Listing]:
+def get_listings(session: SyncSession, agent_id: int) -> list[Listing]:
     """Reads the agent's ``listings`` id list, then batch-reads every listing it
     references. Returns an empty list if the agent doesn't exist or has none."""
     agent_key = AGENTS.id(agent_id)
 
-    def _op(tx: SyncSession) -> List[Listing]:
+    def _op(tx: SyncSession) -> list[Listing]:
         stream = tx.query(agent_key).bins(["listings"]).execute()
         row = stream.first()
         stream.close()
@@ -130,7 +129,7 @@ def get_listings(session: SyncSession, agent_id: int) -> List[Listing]:
             return []
 
         keys = LISTINGS.ids(list(listing_ids))
-        results: List[Listing] = []
+        results: list[Listing] = []
         listing_stream = tx.query(keys).execute()
         for r in listing_stream:
             if r.is_ok and r.record is not None:

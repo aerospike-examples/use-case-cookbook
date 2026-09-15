@@ -7,7 +7,6 @@ case's module for its namespace/set names, taken from :mod:`usecasecookbook.conf
 """
 
 from abc import ABC, abstractmethod
-from typing import List
 
 from aerospike_sdk import SyncSession
 
@@ -27,10 +26,10 @@ class UseCase(ABC):
     def get_reference(self) -> str:
         """URL of the UseCases/*.md doc fully documenting this use case."""
 
-    def get_tags(self) -> List[str]:
+    def get_tags(self) -> list[str]:
         return []
 
-    def get_params(self) -> List[Parameter]:
+    def get_params(self) -> list[Parameter]:
         return []
 
     @abstractmethod

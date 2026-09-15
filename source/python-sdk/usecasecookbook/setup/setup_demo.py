@@ -6,7 +6,7 @@ setup/model.py) since this SDK has no object mapper.
 
 import random
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from aerospike_sdk import DataSet, SyncSession
 
@@ -25,7 +25,7 @@ def _random_account() -> Account:
     name = f"{random.choice(FIRST_NAMES)} {random.choice(LAST_NAMES)}'s account"
     balance_in_cents = random.randint(500, 2_000_000)
     five_years = timedelta(days=5 * 365)
-    date_opened = datetime.now() - timedelta(seconds=random.uniform(0, five_years.total_seconds()))
+    date_opened = datetime.now(timezone.utc) - timedelta(seconds=random.uniform(0, five_years.total_seconds()))
     return Account(str(uuid.uuid4()), name, balance_in_cents, date_opened)
 
 

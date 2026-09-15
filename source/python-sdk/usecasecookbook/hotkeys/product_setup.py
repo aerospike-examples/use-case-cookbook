@@ -6,8 +6,8 @@ from aerospike_async import Key
 from aerospike_sdk import SyncSession
 
 from usecasecookbook.hotkeys import keys as hot_key_keys
-from usecasecookbook.hotkeys.simulation import HOT_PRODUCT_ID
 from usecasecookbook.hotkeys.model import HotKeyProduct
+from usecasecookbook.hotkeys.simulation import HOT_PRODUCT_ID
 
 
 def truncate_and_seed(session: SyncSession, replica_count: int) -> None:

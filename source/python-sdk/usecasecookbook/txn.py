@@ -14,7 +14,8 @@ Every transactional use case should call :func:`run_in_transaction` instead of
 ``session.do_in_transaction`` directly.
 """
 
-from typing import Any, Callable, TypeVar
+from collections.abc import Callable
+from typing import TypeVar
 
 from aerospike_sdk import SyncSession
 

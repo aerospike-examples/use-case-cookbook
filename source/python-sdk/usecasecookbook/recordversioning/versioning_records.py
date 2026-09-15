@@ -20,8 +20,8 @@ write builder as a workaround.
 """
 
 import random
+from collections.abc import Callable
 from datetime import datetime, timezone
-from typing import Callable, Dict, Optional
 
 from aerospike_async import MapOrder
 from aerospike_sdk import DataSet, SyncSession
@@ -43,7 +43,7 @@ TRADE_CONTENTS = DataSet.of(config.NAMESPACE, "uccb_tradecontent")
 ChangeHandler = Callable[[dict, object], object]
 
 
-def _form_key(dataset: DataSet, trade_id: int, version: Optional[int] = None):
+def _form_key(dataset: DataSet, trade_id: int, version: int | None = None):
     if version is None or version < 0:
         return dataset.id(trade_id)
     return dataset.id(f"{trade_id}:{version}")
@@ -120,7 +120,7 @@ class VersioningRecords(UseCase):
             bins = row.record.bins
 
             current_version = bins["version"]
-            versions_bin: Optional[Dict] = bins.get("versions")
+            versions_bin: dict | None = bins.get("versions")
 
             # Copy the current effective record (except "versions") to a new historical,
             # immutable record.
@@ -155,7 +155,7 @@ class VersioningRecords(UseCase):
 
         return run_in_transaction(session, _op)
 
-    def _read_at_time(self, session: SyncSession, trade_id: int, timestamp: float) -> Optional[TradeBase]:
+    def _read_at_time(self, session: SyncSession, trade_id: int, timestamp: float) -> TradeBase | None:
         unversioned_key = _form_key(TRADE_BASES, trade_id)
 
         row = (

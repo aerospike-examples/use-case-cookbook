@@ -10,8 +10,7 @@ no strong-consistency namespace).
 
 import random
 import uuid
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional
+from datetime import datetime, timedelta, timezone
 
 from aerospike_async import ListReturnType
 from aerospike_sdk import DataSet, SyncSession
@@ -36,21 +35,21 @@ def _random_customer(cust_id: str) -> Customer:
     last = random.choice(LAST_NAMES)
     fifty_years = timedelta(days=50 * 365)
     ten_years = timedelta(days=10 * 365)
-    dob = datetime.now() - timedelta(
+    dob = datetime.now(timezone.utc) - timedelta(
         seconds=random.uniform(fifty_years.total_seconds() / 2, fifty_years.total_seconds()),
     )
-    date_joined = datetime.now() - timedelta(seconds=random.uniform(0, ten_years.total_seconds()))
+    date_joined = datetime.now(timezone.utc) - timedelta(seconds=random.uniform(0, ten_years.total_seconds()))
     return Customer(cust_id, first, last, dob, date_joined)
 
 
 def _random_account(account_id: str) -> Account:
     balance_in_cents = random.randint(500, 2_000_000)
     five_years = timedelta(days=5 * 365)
-    date_opened = datetime.now() - timedelta(seconds=random.uniform(0, five_years.total_seconds()))
+    date_opened = datetime.now(timezone.utc) - timedelta(seconds=random.uniform(0, five_years.total_seconds()))
     return Account(account_id, f"Account {account_id}", balance_in_cents, date_opened)
 
 
-def add_account(session: SyncSession, account: Account, owner_ids: List[str]) -> bool:
+def add_account(session: SyncSession, account: Account, owner_ids: list[str]) -> bool:
     """Adds a new account and updates every owning customer's ``accounts`` list, all
     inside a transaction. Returns ``True`` if every operation succeeded.
 
@@ -71,14 +70,18 @@ def add_account(session: SyncSession, account: Account, owner_ids: List[str]) ->
             .bin("accounts").list_append(account.id, unique=True, no_fail=True)
             .execute()
         )
-        results = list(stream)
-        stream.close()
-        return all(r.is_ok for r in results)
+        try:
+            # Iterate the stream directly rather than collecting it into a list first -
+            # short-circuits on the first failure instead of waiting for every batched
+            # write to arrive before checking any of them.
+            return all(r.is_ok for r in stream)
+        finally:
+            stream.close()
 
     return run_in_transaction(session, _op)
 
 
-def get_related_customers(session: SyncSession, customer_id: str) -> Dict[str, int]:
+def get_related_customers(session: SyncSession, customer_id: str) -> dict[str, int]:
     """Determines every customer related to ``customer_id`` - i.e. sharing ownership of
     at least one account - and how many accounts they share. Returns a map of related
     customer id to shared-account count."""
@@ -92,7 +95,7 @@ def get_related_customers(session: SyncSession, customer_id: str) -> Dict[str, i
         return {}
 
     account_keys = ACCOUNTS.ids(list(account_ids))
-    counts: Dict[str, int] = {}
+    counts: dict[str, int] = {}
     account_stream = session.query(account_keys).bins(["owners"]).execute()
     for row in account_stream:
         if row.is_ok and row.record is not None:
@@ -103,7 +106,7 @@ def get_related_customers(session: SyncSession, customer_id: str) -> Dict[str, i
     return counts
 
 
-def get_related_account_ids(session: SyncSession, customer_id: str) -> Optional[List[str]]:
+def get_related_account_ids(session: SyncSession, customer_id: str) -> list[str] | None:
     """Gets the list of account ids related to a customer, or ``None`` if the customer
     does not exist."""
     stream = session.query(CUSTOMERS.id(customer_id)).execute()
@@ -153,7 +156,7 @@ def remove_association(session: SyncSession, customer_id: str, account_id: str) 
     run_in_transaction(session, _op)
 
 
-def display_related_customers(relationships: Dict[str, int]) -> None:
+def display_related_customers(relationships: dict[str, int]) -> None:
     """Prints the map of customer relationships to the console."""
     print(" Customer | Count")
     print("----------+------")

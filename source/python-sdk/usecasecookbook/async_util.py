@@ -10,9 +10,9 @@ import random
 import threading
 import time
 import traceback
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timedelta
-from typing import Callable, List, Optional
+from datetime import datetime, timedelta, timezone
 
 
 class Async:
@@ -31,17 +31,17 @@ class Async:
         self._end = self._start + duration_seconds
         self._should_terminate = threading.Event()
         self._executor = ThreadPoolExecutor(max_workers=256)
-        self._futures: List = []
-        self._time_divisor: Optional[float] = None
-        self._start_virtual_time_monotonic: Optional[float] = None
-        self._start_physical_time: Optional[float] = None
+        self._futures: list = []
+        self._time_divisor: float | None = None
+        self._start_virtual_time_monotonic: float | None = None
+        self._start_physical_time: float | None = None
 
     def time_remaining_seconds(self) -> float:
         return max(0.0, self._end - time.monotonic())
 
     def use_virtual_time(
         self, logical_time: timedelta, physical_time: timedelta,
-        start_offset: Optional[timedelta] = None,
+        start_offset: timedelta | None = None,
     ) -> "Async":
         self._time_divisor = max(
             1.0, logical_time.total_seconds() / physical_time.total_seconds()
@@ -59,10 +59,12 @@ class Async:
         return self.virtual_time() + random.uniform(min_variance_seconds, max_variance_seconds)
 
     def virtual_date(self) -> datetime:
-        return datetime.fromtimestamp(self.virtual_time())
+        return datetime.fromtimestamp(self.virtual_time(), tz=timezone.utc)
 
     def virtual_date_with_variance(self, min_variance_seconds: float, max_variance_seconds: float) -> datetime:
-        return datetime.fromtimestamp(self.virtual_time_with_variance(min_variance_seconds, max_variance_seconds))
+        return datetime.fromtimestamp(
+            self.virtual_time_with_variance(min_variance_seconds, max_variance_seconds), tz=timezone.utc,
+        )
 
     def terminate(self) -> "Async":
         self._should_terminate.set()
@@ -88,7 +90,7 @@ class Async:
             try:
                 while not self._should_terminate.is_set():
                     runner()
-            except Exception:
+            except Exception:  # noqa: BLE001 - thread-boundary catch, one bad iteration shouldn't kill the loop
                 print("Continuously executing thread threw unhandled exception:")
                 traceback.print_exc()
 
@@ -108,7 +110,7 @@ class Async:
                 while not self._should_terminate.is_set():
                     runner()
                     time.sleep(period_seconds)
-            except Exception:
+            except Exception:  # noqa: BLE001 - thread-boundary catch, one bad iteration shouldn't kill the loop
                 print("Periodic thread threw unhandled exception:")
                 traceback.print_exc()
 

@@ -5,8 +5,8 @@ No object mapper exists in this SDK - each model is a plain dataclass with hand-
 """
 
 from dataclasses import dataclass
-from datetime import datetime
-from typing import Any, Dict, Optional
+from datetime import datetime, timezone
+from typing import Any
 
 
 @dataclass
@@ -18,7 +18,7 @@ class Agent:
     phone_num: str
     reg_date: datetime
 
-    def to_bins(self) -> Dict[str, Any]:
+    def to_bins(self) -> dict[str, Any]:
         return {
             "agentId": self.agent_id,
             "firstName": self.first_name,
@@ -29,14 +29,14 @@ class Agent:
         }
 
     @staticmethod
-    def from_bins(bins: Dict[str, Any]) -> "Agent":
+    def from_bins(bins: dict[str, Any]) -> "Agent":
         return Agent(
             agent_id=bins["agentId"],
             first_name=bins["firstName"],
             last_name=bins["lastName"],
             email=bins["email"],
             phone_num=bins["phoneNum"],
-            reg_date=datetime.fromtimestamp(bins["regDate"]),
+            reg_date=datetime.fromtimestamp(bins["regDate"], tz=timezone.utc),
         )
 
 
@@ -53,7 +53,7 @@ class Listing:
     agent_id: int
     description: str
 
-    def to_bins(self) -> Dict[str, Any]:
+    def to_bins(self) -> dict[str, Any]:
         return {
             "id": self.id,
             "line1": self.line1,
@@ -68,7 +68,7 @@ class Listing:
         }
 
     @staticmethod
-    def from_bins(bins: Dict[str, Any]) -> "Listing":
+    def from_bins(bins: dict[str, Any]) -> "Listing":
         return Listing(
             id=bins["id"],
             line1=bins["line1"],
@@ -77,7 +77,7 @@ class Listing:
             state=bins["state"],
             zip_code=bins["zipCode"],
             url=bins["url"],
-            date_listed=datetime.fromtimestamp(bins["dateListed"]),
+            date_listed=datetime.fromtimestamp(bins["dateListed"], tz=timezone.utc),
             agent_id=bins["agentId"],
             description=bins["description"],
         )

@@ -5,8 +5,8 @@ No object mapper exists in this SDK - each model is a plain dataclass with hand-
 """
 
 from dataclasses import dataclass
-from datetime import datetime
-from typing import Any, Dict
+from datetime import datetime, timezone
+from typing import Any
 
 
 @dataclass
@@ -16,7 +16,7 @@ class Account:
     balance_in_cents: int
     date_opened: datetime
 
-    def to_bins(self) -> Dict[str, Any]:
+    def to_bins(self) -> dict[str, Any]:
         return {
             "id": self.id,
             "accountName": self.account_name,
@@ -25,12 +25,12 @@ class Account:
         }
 
     @staticmethod
-    def from_bins(bins: Dict[str, Any]) -> "Account":
+    def from_bins(bins: dict[str, Any]) -> "Account":
         return Account(
             id=bins["id"],
             account_name=bins["accountName"],
             balance_in_cents=bins["balanceInCents"],
-            date_opened=datetime.fromtimestamp(bins["dateOpened"]),
+            date_opened=datetime.fromtimestamp(bins["dateOpened"], tz=timezone.utc),
         )
 
 
@@ -42,7 +42,7 @@ class Customer:
     dob: datetime
     date_joined: datetime
 
-    def to_bins(self) -> Dict[str, Any]:
+    def to_bins(self) -> dict[str, Any]:
         return {
             "custId": self.cust_id,
             "firstName": self.first_name,
@@ -52,11 +52,11 @@ class Customer:
         }
 
     @staticmethod
-    def from_bins(bins: Dict[str, Any]) -> "Customer":
+    def from_bins(bins: dict[str, Any]) -> "Customer":
         return Customer(
             cust_id=bins["custId"],
             first_name=bins["firstName"],
             last_name=bins["lastName"],
-            dob=datetime.fromtimestamp(bins["dob"]),
-            date_joined=datetime.fromtimestamp(bins["dateJoined"]),
+            dob=datetime.fromtimestamp(bins["dob"], tz=timezone.utc),
+            date_joined=datetime.fromtimestamp(bins["dateJoined"], tz=timezone.utc),
         )

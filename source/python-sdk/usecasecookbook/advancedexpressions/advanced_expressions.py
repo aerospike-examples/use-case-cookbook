@@ -10,7 +10,6 @@ see :meth:`AdvancedExpressions.multiple_commands_in_one_operation` for why.
 """
 
 import random
-from typing import List
 
 from aerospike_async import ListOrderType
 from aerospike_sdk import DataSet, SyncSession
@@ -116,7 +115,7 @@ class AdvancedExpressions(UseCase):
         """Membership check via AEL's ``value in $.bin`` operator."""
         self._show_cars_matching_expression(session, f"'{feature}' in $.features", 10)
 
-    def _find_cars_with_colors(self, session: SyncSession, colors: List[str]) -> None:
+    def _find_cars_with_colors(self, session: SyncSession, colors: list[str]) -> None:
         """Same operator, reversed direction: ``$.color in [...]``."""
         color_list = ", ".join(f'"{c}"' for c in colors)
         self._show_cars_matching_expression(session, f"$.color in [{color_list}]", 10)

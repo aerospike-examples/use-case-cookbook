@@ -10,11 +10,9 @@ strong-consistency status as a plain query.
 
 import argparse
 import sys
-from typing import List, Optional
 
 from usecasecookbook import ansi_colors as c
-from usecasecookbook import config
-from usecasecookbook import connector
+from usecasecookbook import config, connector
 from usecasecookbook import use_case_registry as registry
 from usecasecookbook.interactive_menu import InteractiveMenu
 from usecasecookbook.parameter import Parameter
@@ -46,13 +44,13 @@ def list_use_cases() -> None:
         print(f"   {uc.get_name()}")
 
 
-def apply_param_overrides(use_case: UseCase, overrides: dict) -> Optional[str]:
+def apply_param_overrides(use_case: UseCase, overrides: dict) -> str | None:
     """Applies ``--param.<name>=<value>`` overrides onto ``use_case``'s parameters.
     Returns an error message if a name/type doesn't match, else ``None``.
     """
     params_by_name = {p.name.lower(): p for p in use_case.get_params()}
     for name, raw_value in overrides.items():
-        param: Optional[Parameter] = params_by_name.get(name.lower())
+        param: Parameter | None = params_by_name.get(name.lower())
         if param is None:
             return f"Use case '{use_case.get_name()}' has no parameter named '{name}'"
         value_type = type(param.value)
@@ -66,7 +64,7 @@ def apply_param_overrides(use_case: UseCase, overrides: dict) -> Optional[str]:
     return None
 
 
-def parse_param_overrides(argv: List[str]) -> dict:
+def parse_param_overrides(argv: list[str]) -> dict:
     overrides = {}
     for arg in argv:
         if arg.startswith("--param.") and "=" in arg:

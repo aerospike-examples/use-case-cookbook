@@ -6,7 +6,7 @@ established pattern.
 """
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, Optional
+from typing import Any
 
 
 @dataclass
@@ -25,9 +25,9 @@ class TradeBase:
     trade_version: int = 0
     record_complete: bool = True
     data_version: int = 0
-    versions: Dict[int, int] = field(default_factory=dict)
+    versions: dict[int, int] = field(default_factory=dict)
 
-    def to_bins(self) -> Dict[str, Any]:
+    def to_bins(self) -> dict[str, Any]:
         return {
             "id": self.id,
             "sourceSystemId": self.source_system_id,
@@ -47,7 +47,7 @@ class TradeBase:
         }
 
     @staticmethod
-    def from_bins(bins: Dict[str, Any]) -> "TradeBase":
+    def from_bins(bins: dict[str, Any]) -> "TradeBase":
         return TradeBase(
             id=bins["id"],
             source_system_id=bins.get("sourceSystemId", ""),
@@ -71,10 +71,10 @@ class TradeBase:
 class TradeStaticData:
     trade_id: int
     version: int = 0
-    data: Optional[str] = None
+    data: str | None = None
     mutable_data: int = 0
 
-    def to_bins(self) -> Dict[str, Any]:
+    def to_bins(self) -> dict[str, Any]:
         return {
             "tradeId": self.trade_id,
             "version": self.version,
@@ -83,7 +83,7 @@ class TradeStaticData:
         }
 
     @staticmethod
-    def from_bins(bins: Dict[str, Any]) -> "TradeStaticData":
+    def from_bins(bins: dict[str, Any]) -> "TradeStaticData":
         return TradeStaticData(
             trade_id=bins["tradeId"],
             version=bins.get("version", 0),

@@ -8,13 +8,11 @@ continuous/periodic-until-terminated shape ``Async`` provides.
 
 import threading
 import time
-import traceback
 from collections import Counter
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Callable, Optional
 
-from aerospike_sdk.exceptions import AerospikeError
-from aerospike_sdk.exceptions import ResultCode
+from aerospike_sdk.exceptions import AerospikeError, ResultCode
 
 # Shared simulation parameters for the hot-key use cases.
 NUM_THREADS = 25
@@ -123,7 +121,7 @@ def _describe_error(e: Exception) -> str:
 
 def run_simulation(
     phase_label: str, num_threads: int, duration_secs: float, attempt: OperationAttempt,
-    periodic_side_task: Optional[OperationAttempt] = None, periodic_interval_secs: float = 0,
+    periodic_side_task: OperationAttempt | None = None, periodic_interval_secs: float = 0,
 ) -> HotKeySimulationStats:
     """Executes ``num_threads`` worker threads for ``duration_secs``, invoking ``attempt`` as
     fast as possible on each thread. Optionally runs ``periodic_side_task`` on a background
@@ -156,7 +154,7 @@ def run_simulation(
                     totals.record_key_busy()
                 else:
                     totals.record_other_error(_describe_error(e))
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 - catch-all fallback after the AerospikeError branch above, so any error still counts toward stats instead of killing the worker thread
                 totals.record_other_error(_describe_error(e))
 
     threads = [threading.Thread(target=worker, daemon=True) for _ in range(num_threads)]
@@ -183,8 +181,8 @@ def run_simulation(
 
 
 def _start_periodic_side_task(
-    periodic_side_task: Optional[OperationAttempt], periodic_interval_secs: float, running: threading.Event,
-) -> Optional[threading.Thread]:
+    periodic_side_task: OperationAttempt | None, periodic_interval_secs: float, running: threading.Event,
+) -> threading.Thread | None:
     if periodic_side_task is None or periodic_interval_secs <= 0:
         return None
 
@@ -195,8 +193,7 @@ def _start_periodic_side_task(
                 return
             try:
                 periodic_side_task()
-            except Exception:
-                # Side operations are background traffic; main stats stay focused on hot-path load.
+            except Exception:  # noqa: BLE001, S110 - side operations are background traffic; main stats stay focused on hot-path load
                 pass
 
     thread = threading.Thread(target=loop, daemon=True)

@@ -19,7 +19,6 @@ bucket's boundary is then resolved by reading extra keys from neighboring bucket
 import random
 import threading
 from bisect import bisect_left
-from typing import List
 
 from aerospike_async import Key, MapOrder
 from aerospike_sdk import DataSet, SyncSession
@@ -204,7 +203,7 @@ class Leaderboard(UseCase):
 
         run_in_transaction(session, op)
 
-    def _add_overflow_lower(self, session: SyncSession, lower: List[str], bucket: int, n: int) -> None:
+    def _add_overflow_lower(self, session: SyncSession, lower: list[str], bucket: int, n: int) -> None:
         current = bucket - 1
         while current >= 0 and len(lower) < n:
             index = len(lower) - n
@@ -218,7 +217,7 @@ class Leaderboard(UseCase):
                 lower[0:0] = extra
             current -= 1
 
-    def _add_overflow_higher(self, session: SyncSession, higher: List[str], bucket: int, n: int) -> None:
+    def _add_overflow_higher(self, session: SyncSession, higher: list[str], bucket: int, n: int) -> None:
         current = bucket + 1
         while current <= MAX_BUCKETS and len(higher) < n + 1:
             count = n + 1 - len(higher)
@@ -234,7 +233,7 @@ class Leaderboard(UseCase):
 
     def get_scores_around_player(
         self, session: SyncSession, player_id: int, score: int, num_players_either_side: int,
-    ) -> List[ScoreEntry]:
+    ) -> list[ScoreEntry]:
         """Gets the scores on either side of a player's score. Reads a clamped index range
         either side of the player's map key directly via ``on_map_key_relative_index_range``,
         pulling in extra entries from neighboring buckets if the range overflows the current
@@ -251,7 +250,7 @@ class Leaderboard(UseCase):
             .get_keys()
             .execute().first()
         )
-        combined: List[str] = []
+        combined: list[str] = []
         if row is not None and row.is_ok and row.record is not None:
             combined = list(row.record.bins.get(SCOREBOARD_BIN) or [])
 
@@ -271,7 +270,7 @@ class Leaderboard(UseCase):
 
         return [self._map_key_to_score_entry(k) for k in lower] + [self._map_key_to_score_entry(k) for k in higher]
 
-    def populate_full_player_details(self, session: SyncSession, partial_players: List[ScoreEntry]) -> List[Player]:
+    def populate_full_player_details(self, session: SyncSession, partial_players: list[ScoreEntry]) -> list[Player]:
         if not partial_players:
             return []
         keys = [PLAYERS.id(p.id) for p in partial_players]

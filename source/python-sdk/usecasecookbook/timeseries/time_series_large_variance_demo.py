@@ -44,8 +44,8 @@ isn't expressible - the map/list range selectors in this SDK's AEL grammar
 
 import random
 import uuid
+from collections.abc import Sequence
 from datetime import datetime, timezone
-from typing import List, Optional, Sequence, Set
 
 from aerospike_async import ListOrderType, MapOrder, MapReturnType, ResultCode
 from aerospike_sdk import DataSet, SyncSession
@@ -184,7 +184,7 @@ def _try_write_to_root_block(session: SyncSession, root_key, event: Event, set_e
         raise
 
 
-def _read_continuation_list(session: SyncSession, root_key) -> List[str]:
+def _read_continuation_list(session: SyncSession, root_key) -> list[str]:
     row = session.query(root_key).bins([CONTINUATION_BIN]).execute().first()
     if row is None or row.record is None:
         return []
@@ -265,13 +265,13 @@ def _split_bucket(session: SyncSession, root_key, bucket_key) -> None:
 # Reads
 # ----------------------------------------------------------------------
 
-def _oldest_timestamp(start_timestamp: Optional[int]) -> int:
+def _oldest_timestamp(start_timestamp: int | None) -> int:
     if start_timestamp is not None:
         return start_timestamp
     return int(datetime.now(timezone.utc).timestamp() * 1000) - _MAX_DAYS_TO_STORE * _MILLIS_PER_DAY
 
 
-def _latest_timestamp(end_timestamp: Optional[int]) -> int:
+def _latest_timestamp(end_timestamp: int | None) -> int:
     if end_timestamp is not None:
         return end_timestamp
     return int(datetime.now(timezone.utc).timestamp() * 1000)
@@ -280,18 +280,18 @@ def _latest_timestamp(end_timestamp: Optional[int]) -> int:
 def get_events_between(
     session: SyncSession,
     account_id: str,
-    start_timestamp: Optional[int] = None,
-    end_timestamp: Optional[int] = None,
-    event_id: Optional[str] = None,
+    start_timestamp: int | None = None,
+    end_timestamp: int | None = None,
+    event_id: str | None = None,
     count: int = 50,
     direction: str = DESCENDING,
     device_ids: Sequence[str] = (),
-) -> List[Event]:
+) -> list[Event]:
     _validate_account_id(account_id)
     _validate_count(count)
     _validate_timestamps(start_timestamp, end_timestamp)
 
-    results: List[Event] = []
+    results: list[Event] = []
 
     if event_id is not None:
         if direction == ASCENDING:
@@ -306,7 +306,7 @@ def get_events_between(
 
     start_record = _bucket_offset(_extract_timestamp_from_event_id(earliest_event_id))
     end_record = _bucket_offset(_extract_timestamp_from_event_id(latest_event_id))
-    device_filter: Optional[Set[str]] = set(device_ids) if device_ids else None
+    device_filter: set[str] | None = set(device_ids) if device_ids else None
 
     if direction == ASCENDING:
         record_key = start_record
@@ -332,7 +332,7 @@ def get_events_between(
 
 def _process_root_and_continuations(
     session: SyncSession, root_key, earliest_event_id: str, latest_event_id: str,
-    count: int, results: List[Event], direction: str, device_filter: Optional[Set[str]],
+    count: int, results: list[Event], direction: str, device_filter: set[str] | None,
 ) -> None:
     row = session.query(root_key).execute().first()
     if row is None or row.record is None:
@@ -362,22 +362,22 @@ def _process_root_and_continuations(
 
 
 def get_events_before(
-    session: SyncSession, account_id: str, event_id: Optional[str] = None,
+    session: SyncSession, account_id: str, event_id: str | None = None,
     count: int = 50, device_ids: Sequence[str] = (),
-) -> List[Event]:
+) -> list[Event]:
     return get_events_between(session, account_id, None, None, event_id, count, DESCENDING, device_ids)
 
 
 def get_events_after(
     session: SyncSession, account_id: str, event_id: str,
     count: int = 50, device_ids: Sequence[str] = (),
-) -> List[Event]:
+) -> list[Event]:
     return get_events_between(session, account_id, None, None, event_id, count, ASCENDING, device_ids)
 
 
 def _read_filtered_bucket(
     session: SyncSession, key, earliest_event_id: str, latest_event_id: str,
-    device_filter: Optional[Set[str]],
+    device_filter: set[str] | None,
 ) -> list:
     """See time_series_demo.py's ``_read_filtered_bucket`` for the native-CDT-range-plus-
     client-side-device-filter rationale (this module's ``_split_bucket`` docstring covers the
@@ -398,7 +398,7 @@ def _read_filtered_bucket(
     return entries
 
 
-def _add_events_to_results(count: int, entries: list, results: List[Event], direction: str) -> None:
+def _add_events_to_results(count: int, entries: list, results: list[Event], direction: str) -> None:
     if not entries:
         return
     ordered = reversed(entries) if direction == DESCENDING else entries
@@ -431,7 +431,7 @@ def _validate_count(count: int) -> None:
         raise ValueError("Count must be positive")
 
 
-def _validate_timestamps(start_timestamp: Optional[int], end_timestamp: Optional[int]) -> None:
+def _validate_timestamps(start_timestamp: int | None, end_timestamp: int | None) -> None:
     if start_timestamp is not None and end_timestamp is not None and start_timestamp >= end_timestamp:
         raise ValueError("start_timestamp must be less than end timestamp")
 
@@ -469,13 +469,12 @@ def _build_event(account_id: str, device_id: str, timestamp_ms: int) -> Event:
     )
 
 
-def display_events(events: List[Event]) -> None:
+def display_events(events: list[Event]) -> None:
     for i, event in enumerate(events, start=1):
         print(f"{i:2d}: {event.id} - {event.timestamp} - {event.device_id}")
 
 
 def _generate_sample_data(session: SyncSession) -> None:
-    accounts_created = 0
     devices_created = 0
     events_created = 0
 
@@ -500,9 +499,8 @@ def _generate_sample_data(session: SyncSession) -> None:
                     events_created += 1
                 devices_created += 1
 
-        accounts_created += 1
-        if accounts_created % 10 == 0 or accounts_created == _NUM_ACCOUNTS:
-            print(f"{accounts_created:,} accounts, {devices_created:,} devices, {events_created:,} events")
+        if account_num % 10 == 0 or account_num == _NUM_ACCOUNTS:
+            print(f"{account_num:,} accounts, {devices_created:,} devices, {events_created:,} events")
 
 
 def _demonstrate_queries(session: SyncSession) -> None:

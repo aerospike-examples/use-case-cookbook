@@ -5,7 +5,7 @@ no need for the reflection trick the Java UseCaseExecutor uses to mutate a "priv
 """
 
 from dataclasses import dataclass
-from typing import Generic, Optional, TypeVar
+from typing import Generic, TypeVar
 
 T = TypeVar("T")
 
@@ -14,7 +14,7 @@ T = TypeVar("T")
 class Parameter(Generic[T]):
     name: str
     value: T
-    description: Optional[str] = None
+    description: str | None = None
 
     def get(self) -> T:
         return self.value

@@ -6,7 +6,7 @@ those are still written as raw bins (see product_setup.py).
 """
 
 from dataclasses import dataclass
-from typing import Any, Dict
+from typing import Any
 
 
 @dataclass
@@ -16,7 +16,7 @@ class HotKeyProduct:
     description: str
     units_sold: int
 
-    def to_bins(self) -> Dict[str, Any]:
+    def to_bins(self) -> dict[str, Any]:
         return {
             "id": self.id,
             "sku": self.sku,
@@ -25,7 +25,7 @@ class HotKeyProduct:
         }
 
     @staticmethod
-    def from_bins(bins: Dict[str, Any]) -> "HotKeyProduct":
+    def from_bins(bins: dict[str, Any]) -> "HotKeyProduct":
         return HotKeyProduct(
             id=bins["id"], sku=bins["sku"], description=bins["description"],
             units_sold=bins["unitsSold"],

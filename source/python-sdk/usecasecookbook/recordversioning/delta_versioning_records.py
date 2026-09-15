@@ -5,33 +5,47 @@ a small *delta* audit record (``id:version``) describing only which bins changed
 (``Inserted``/``Changed``/``TypeChanged``/``Removed``/``Same``), plus their new values -
 enough to reconstruct any past version by replaying deltas from version 0 forward.
 
-Deliberate simplification vs. the Java SDK port: that port classifies bin-level deltas
-entirely server-side, in one ``operate()`` call, via a snapshot-before/apply/compare-after
-sequence of ``Exp``/``MapExp`` write-and-read expressions (see its own extensive class
-docstring for the SDK-specific parameter errors that forced it down that path instead of
-AEL). This port instead reads the record before and after applying the caller's own
-change, and diffs the two bin dicts in plain Python - one extra round trip (read-before,
-write, read-after, vs. the Java port's single combined ``operate()`` call), but far
-simpler and doesn't bet a correctness-critical diff on this SDK's own expression-write
-composition, which is still only lightly verified for this kind of nested conditional
-logic (see ``../timeseries``'s and ``../gaming``'s own AEL/expression gaps). A full-record
-diff (every bin present in either snapshot) also replaces the Java port's
-narrower "only bins the caller's own operations touched" diff - behaviorally equivalent
-here, since nothing else in the record changes between the two reads, but simpler to
-reason about since it doesn't need to inspect the caller's operations to know what to
-compare.
+Like the Java SDK port, this classifies bin-level deltas entirely server-side in one
+``operate()``-style call: for each bin the caller's change touches, snapshot its current
+value into a temporary bin (``_t0``, ``_t1``, ...) via an expression write, apply the
+caller's own operations unmodified, then compare each temp snapshot against the bin's new
+value via an expression read, writing the classification into a result label (``_a0``,
+``_a1``, ...). The live-record update and the delta audit record insert remain two
+round trips total, matching the Java port - not three, which a naive
+read-before/write/read-after client-side diff would need.
 
-``change_handler`` mirrors ``versioning_records.ChangeHandler``'s contract: it receives the
-pre-change bins and the write builder already targeting the effective key, and returns
-that builder extended with its own bin changes - this lets a caller express a blind
-increment (``.add(...)``) without knowing the resulting value, same as the Java version's
-``List<Operation>`` parameter.
+``changed_bins``/``apply_ops`` is this port's equivalent of the Java version's
+``List<Operation> userOps`` parameter: the caller declares which bin names its change will
+touch (so the snapshot/compare expressions can be built ahead of the write) and supplies a
+callback that chains the actual write operations onto the builder - which can be a blind
+increment (``.add(...)``) or any other CDT write, without the caller ever needing to know
+the resulting value up front. Python has no standalone ``Operation`` value type to inspect
+bin names from the way Java does, so the bin list is passed explicitly instead of derived.
+
+This SDK's AEL grammar has no write-shaped terminals (see ``../README.md``), so the
+server-side snapshot/compare/versions-bookkeeping expressions here are built with
+``aerospike_sdk.Exp`` (``FilterExpression``) instead - a near-complete
+``Exp``/``MapExp``/``ListExp``-equivalent builder, confirmed by testing against a live
+cluster rather than assumed. One read (the pre-update ``version`` value, needed to number
+the delta record even though most of the session doesn't otherwise need it) is expressed
+as a genuine AEL string (``.select_from("when(...)")``) alongside the ``Exp``-based writes
+in the same call, demonstrating - as the Java port's own reviewer asked for - that AEL and
+expression operations can be freely mixed within one call rather than a call needing to be
+one or the other.
 """
 
+from collections.abc import Callable
 from datetime import datetime, timezone
-from typing import Any, Callable, Dict, List, Optional
 
-from aerospike_sdk import DataSet, SyncSession
+from aerospike_async import MapOrder, MapPolicy, MapWriteMode
+from aerospike_sdk import (
+    DataSet,
+    Exp,
+    ExpType,
+    ListReturnType,
+    MapReturnType,
+    SyncSession,
+)
 
 from usecasecookbook import config
 from usecasecookbook.recordversioning.model import TradeBase
@@ -42,11 +56,40 @@ NUM_RECORDS = 100
 SOURCE_SYSTEMS = ["FIX", "MANUAL", "BLOOMBERG", "REUTERS"]
 BOOKS = ["EQ-DESK-1", "FX-DESK-2", "RATES-DESK-3", "CREDIT-DESK-4"]
 COUNTERPARTIES = ["Acme Capital", "Northwind Bank", "Contoso Securities", "Fabrikam Trading"]
-PROTECTED_BINS = {"version", "versions", "updatedDate"}
 
 TRADE_BASES = DataSet.of(config.NAMESPACE, "uccb_tradebase")
+VERSIONS_MAP_POLICY = MapPolicy(MapOrder.KEY_ORDERED, MapWriteMode.UPDATE)
 
-ChangeHandler = Callable[[Dict[str, Any], object], object]
+ApplyOps = Callable[[object], object]
+
+# Aerospike's server-side particle-type codes, needed for the bin_type() comparisons
+# below - confirmed empirically against a live cluster, since this SDK doesn't expose a
+# public constant set for these the way the Java client's
+# com.aerospike.client.sdk.command.ParticleType does.
+_INTEGER, _FLOAT, _STRING, _BOOL = 1, 2, 3, 17
+
+_TYPED_BIN_GETTERS = {
+    _INTEGER: Exp.int_bin,
+    _FLOAT: Exp.float_bin,
+    _STRING: Exp.string_bin,
+    _BOOL: Exp.bool_bin,
+}
+
+# Hard-coded mapping of TradeBase bin names to Aerospike particle types (dates as INTEGER).
+BIN_PARTICLE_TYPES: dict[str, int] = {
+    "id": _INTEGER,
+    "sourceSystemId": _STRING,
+    "parentTradeId": _INTEGER,
+    "extTradeId": _STRING,
+    "contentId": _INTEGER,
+    "book": _STRING,
+    "counterparty": _STRING,
+    "tradeDate": _INTEGER,
+    "enteredDate": _INTEGER,
+    "tradeVersion": _INTEGER,
+    "recordComplete": _BOOL,
+    "dataVersion": _INTEGER,
+}
 
 
 def _now_millis() -> int:
@@ -55,6 +98,14 @@ def _now_millis() -> int:
 
 def _delta_key(trade_id: int, version: int):
     return TRADE_BASES.id(f"{trade_id}:{version}")
+
+
+def _temp_bin(index: int) -> str:
+    return f"_t{index}"
+
+
+def _action_bin(index: int) -> str:
+    return f"_a{index}"
 
 
 def _random_trade_base(trade_id: int) -> TradeBase:
@@ -77,42 +128,75 @@ def _random_trade_base(trade_id: int) -> TradeBase:
     )
 
 
-def _next_versions_map(versions: Dict[Any, int], current_version: int, change_ts: float) -> Dict[Any, int]:
-    """Closes the entry currently marked -1 (setting it to the version being closed out)
-    and opens a new one, marked -1, at ``change_ts`` - or at ``old_key + 1`` if that would
-    collide with (or not sort after) the entry being closed, which happens when successive
-    updates to the same trade land in the same millisecond.
+def _current_version_exp() -> Exp:
+    """The live record's current ``version``, or -1 if the record (and hence the bin) is new."""
+    return Exp.cond([Exp.not_(Exp.bin_exists("version")), Exp.int_val(-1), Exp.int_bin("version")])
+
+
+def _snapshot_exp(bin_name: str) -> Exp:
+    """Copies the current value of a bin into a temporary bin before the caller's
+    operations run. Writes ``unknown()`` (a no-op under ``ignore_eval_failure``) when the
+    bin is absent or its particle type doesn't match the expected type, so the subsequent
+    comparison classifies the change correctly.
     """
-    new_versions = dict(versions)
-    old_key = next((k for k, v in new_versions.items() if v == -1), None)
-    if old_key is None:
-        new_versions[change_ts] = -1
-        return new_versions
-    new_key = max(change_ts, old_key + 1)
-    new_versions[old_key] = current_version
-    new_versions[new_key] = -1
-    return new_versions
+    particle_type = BIN_PARTICLE_TYPES[bin_name]
+    typed_get = _TYPED_BIN_GETTERS[particle_type]
+    return Exp.cond([
+        Exp.not_(Exp.bin_exists(bin_name)), Exp.unknown(),
+        Exp.eq(Exp.bin_type(bin_name), Exp.int_val(particle_type)), typed_get(bin_name),
+        Exp.unknown(),
+    ])
 
 
-def _classify_and_diff(before: Dict[str, Any], after: Dict[str, Any]) -> List[Dict[str, Any]]:
-    changes: List[Dict[str, Any]] = []
-    for name in sorted(set(before) | set(after)):
-        if name in PROTECTED_BINS:
-            continue
-        has_before = before.get(name) is not None
-        has_after = after.get(name) is not None
-        if not has_before and not has_after:
-            continue
-        if not has_before:
-            changes.append({"binName": name, "status": "Inserted", "newValue": after[name]})
-        elif not has_after:
-            changes.append({"binName": name, "status": "Removed"})
-        elif type(before[name]) is not type(after[name]):
-            changes.append({"binName": name, "status": "TypeChanged", "newValue": after[name]})
-        elif before[name] != after[name]:
-            changes.append({"binName": name, "status": "Changed", "newValue": after[name]})
-        # else: Same - not recorded.
-    return changes
+def _compare_exp(bin_name: str, temp_bin: str) -> Exp:
+    """Compares a bin's value after the caller's operations with the temporary snapshot
+    taken beforehand, evaluating to ``Inserted``, ``Changed``, ``TypeChanged``,
+    ``Removed``, or ``Same``.
+    """
+    particle_type = BIN_PARTICLE_TYPES[bin_name]
+    typed_get = _TYPED_BIN_GETTERS[particle_type]
+    return Exp.cond([
+        Exp.not_(Exp.bin_exists(bin_name)), Exp.string_val("Removed"),
+        Exp.not_(Exp.bin_exists(temp_bin)), Exp.string_val("Inserted"),
+        Exp.ne(Exp.bin_type(bin_name), Exp.bin_type(temp_bin)), Exp.string_val("TypeChanged"),
+        Exp.eq(typed_get(bin_name), typed_get(temp_bin)), Exp.string_val("Same"),
+        Exp.string_val("Changed"),
+    ])
+
+
+def _versions_exp(change_ts: int) -> Exp:
+    """Computes the ``versions`` map's new value: closes the entry currently marked -1
+    (setting it to the version being closed out) and opens a new one, marked -1, at
+    ``change_ts`` - or at ``old_key + 1`` if that would collide with (or not sort after)
+    the entry being closed, which happens when successive updates to the same trade land
+    in the same millisecond. Short-circuits to a fresh one-entry map when ``versions``
+    doesn't exist yet.
+    """
+    close_and_reopen = Exp.exp_let([
+        Exp.def_("oldKeyList", Exp.map_get_by_value(MapReturnType.KEY, Exp.int_val(-1), Exp.map_bin("versions"), [])),
+        Exp.def_("hasOldKey", Exp.gt(Exp.list_size(Exp.var("oldKeyList"), []), Exp.int_val(0))),
+        Exp.def_("oldKey", Exp.cond([
+            Exp.var("hasOldKey"),
+            Exp.list_get_by_index(ListReturnType.VALUE, ExpType.INT, Exp.int_val(0), Exp.var("oldKeyList"), []),
+            Exp.int_val(0),
+        ])),
+        Exp.def_("newKey", Exp.cond([
+            Exp.var("hasOldKey"),
+            Exp.max([Exp.int_val(change_ts), Exp.num_add([Exp.var("oldKey"), Exp.int_val(1)])]),
+            Exp.int_val(change_ts),
+        ])),
+        Exp.cond([
+            Exp.var("hasOldKey"),
+            Exp.map_put(
+                VERSIONS_MAP_POLICY, Exp.var("newKey"), Exp.int_val(-1),
+                Exp.map_put(VERSIONS_MAP_POLICY, Exp.var("oldKey"), _current_version_exp(), Exp.map_bin("versions"), []),
+                [],
+            ),
+            Exp.map_put(VERSIONS_MAP_POLICY, Exp.var("newKey"), Exp.int_val(-1), Exp.map_bin("versions"), []),
+        ]),
+    ])
+    fresh_map = Exp.map_put(VERSIONS_MAP_POLICY, Exp.int_val(change_ts), Exp.int_val(-1), Exp.map_val({}), [])
+    return Exp.cond([Exp.not_(Exp.bin_exists("versions")), fresh_map, close_and_reopen])
 
 
 class DeltaVersioningRecords(UseCase):
@@ -133,32 +217,61 @@ class DeltaVersioningRecords(UseCase):
 
     def _update_trade_base_with_delta(
         self, session: SyncSession, trade_id: int, timestamp: float, description: str, user: str,
-        change_handler: ChangeHandler,
+        changed_bins: list[str], apply_ops: ApplyOps,
     ) -> int:
         def _op(tx: SyncSession) -> int:
             key = TRADE_BASES.id(trade_id)
-            row = tx.query(key).execute().first()
-            before = dict(row.record.bins) if row is not None and row.record is not None else {}
+            change_ts = int(timestamp) if timestamp else _now_millis()
 
-            current_version = before.get("version", -1)
-            new_version = current_version + 1
-            ts_to_use = timestamp if timestamp else _now_millis()
-
-            builder = change_handler(before, tx.upsert(key))
-            builder = (
-                builder.bin("version").set_to(new_version)
-                .bin("updatedDate").set_to(ts_to_use)
-                .bin("versions").set_to(_next_versions_map(before.get("versions") or {}, current_version, ts_to_use))
+            # The one genuinely AEL-expressible piece of this call: the pre-update
+            # "version" value, read before the Exp write below touches it (an AEL read of
+            # a bin an Exp op already wrote in the same call fails validation; the reverse
+            # order doesn't).
+            builder = tx.upsert(key).bin("version_old").select_from(
+                "when($.version.exists() == false => -1, default => $.version)"
             )
-            builder.execute()
+            for index, bin_name in enumerate(changed_bins):
+                builder = builder.bin(_temp_bin(index)).upsert_from(
+                    _snapshot_exp(bin_name), ignore_eval_failure=True, ignore_op_failure=True,
+                )
 
-            after_row = tx.query(key).execute().first()
-            after = dict(after_row.record.bins) if after_row is not None and after_row.record is not None else {}
-            changes = _classify_and_diff(before, after)
+            builder = apply_ops(builder)
 
-            tx.insert(_delta_key(trade_id, new_version)).bin("description").set_to(description) \
+            for index, bin_name in enumerate(changed_bins):
+                builder = (
+                    builder.bin(_action_bin(index)).select_from(
+                        _compare_exp(bin_name, _temp_bin(index)), ignore_eval_failure=True,
+                    )
+                    .bin(bin_name).get()
+                )
+            for index in range(len(changed_bins)):
+                builder = builder.bin(_temp_bin(index)).set_to(None)
+
+            builder = (
+                builder.bin("versions").upsert_from(_versions_exp(change_ts))
+                .bin("version").upsert_from(Exp.num_add([_current_version_exp(), Exp.int_val(1)]))
+                .bin("updatedDate").set_to(change_ts)
+            )
+
+            result = builder.execute().first()
+            bins = result.record.bins
+
+            changes: list[dict[str, object]] = []
+            for index, bin_name in enumerate(changed_bins):
+                status = bins.get(_action_bin(index))
+                if status is None or status == "Same":
+                    continue
+                change: dict[str, object] = {"binName": bin_name, "status": status}
+                if status != "Removed":
+                    change["newValue"] = bins.get(bin_name)
+                changes.append(change)
+
+            new_version = int(bins["version_old"]) + 1
+
+            tx.insert(_delta_key(trade_id, new_version)) \
+                .bin("description").set_to(description) \
                 .bin("user").set_to(user) \
-                .bin("changeTs").set_to(ts_to_use) \
+                .bin("changeTs").set_to(change_ts) \
                 .bin("deltaVer").set_to(new_version) \
                 .bin("changes").set_to(changes) \
                 .execute()
@@ -167,7 +280,7 @@ class DeltaVersioningRecords(UseCase):
 
         return run_in_transaction(session, _op)
 
-    def _get_audit_trail(self, session: SyncSession, trade_id: int) -> List[Dict[str, Any]]:
+    def _get_audit_trail(self, session: SyncSession, trade_id: int) -> list[dict[str, object]]:
         current = session.query(TRADE_BASES.id(trade_id)).execute().first()
         current_version = current.record.bins["version"]
         trail = []
@@ -177,8 +290,8 @@ class DeltaVersioningRecords(UseCase):
                 trail.append(row.record.bins)
         return trail
 
-    def _reconstruct_at_version(self, session: SyncSession, trade_id: int, target_version: int) -> Dict[str, Any]:
-        reconstructed: Dict[str, Any] = {}
+    def _reconstruct_at_version(self, session: SyncSession, trade_id: int, target_version: int) -> dict[str, object]:
+        reconstructed: dict[str, object] = {}
         for version in range(target_version + 1):
             row = session.query(_delta_key(trade_id, version)).execute().first()
             if row is None or row.record is None:
@@ -207,36 +320,38 @@ class DeltaVersioningRecords(UseCase):
             initial_bins = _random_trade_base(trade_id).to_bins()
             initial_bins.pop("version", None)
             initial_bins.pop("versions", None)
+            initial_bins.pop("updatedDate", None)
+            changed_bins = list(initial_bins.keys())
 
-            def _insert_handler(_before: Dict[str, Any], builder: object, _bins=initial_bins) -> object:
+            def _insert_ops(builder: object, _bins=initial_bins) -> object:
                 for name, value in _bins.items():
-                    if value is not None:
-                        builder = builder.bin(name).set_to(value)
+                    builder = builder.bin(name).set_to(value)
                 return builder
 
             self._update_trade_base_with_delta(
-                session, trade_id, _now_millis(), "Initial insert", "setup", _insert_handler,
+                session, trade_id, _now_millis(), "Initial insert", "setup", changed_bins, _insert_ops,
             )
 
     def run(self, session: SyncSession) -> None:
         trade_id = 2
 
         # An increment - the caller never learns (or needs to supply) the resulting value;
-        # the before/after diff still correctly classifies it as Changed (or Same, on the
-        # rare chance an increment lands back on the same value).
+        # the server-side snapshot/compare still correctly classifies it as Changed (or
+        # Same, on the rare chance an increment lands back on the same value).
         self._update_trade_base_with_delta(
             session, trade_id, 0, "Increment trade version", "batch-user",
-            lambda before, builder: builder.bin("tradeVersion").add(1),
+            ["tradeVersion"], lambda builder: builder.bin("tradeVersion").add(1),
         )
 
         self._update_trade_base_with_delta(
             session, trade_id, 0, "Update counterparty and book", "alice",
-            lambda before, builder: builder.bin("counterparty").set_to("CP-1001").bin("book").set_to("XY"),
+            ["counterparty", "book"],
+            lambda builder: builder.bin("counterparty").set_to("CP-1001").bin("book").set_to("XY"),
         )
 
         self._update_trade_base_with_delta(
             session, trade_id, 0, "Mark record complete", "bob",
-            lambda before, builder: builder.bin("recordComplete").set_to(True),
+            ["recordComplete"], lambda builder: builder.bin("recordComplete").set_to(True),
         )
 
         self._print_audit_trail(session, trade_id)

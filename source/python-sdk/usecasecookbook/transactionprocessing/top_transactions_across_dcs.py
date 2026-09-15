@@ -15,8 +15,7 @@ here rather than as a single AEL read the way ../../java-sdk does it.
 import random
 import threading
 import time
-from datetime import datetime, timedelta
-from typing import Dict, List
+from datetime import datetime, timedelta, timezone
 
 from aerospike_async import MapOrder
 from aerospike_sdk import DataSet, SyncSession
@@ -158,11 +157,11 @@ class TopTransactionsAcrossDcs(UseCase):
         for i, txn in enumerate(top_results, start=1):
             print(
                 f"{i:4d}: {txn.id:>10s} {txn.account_id:>8s} {txn.origin:>10s}  "
-                f"{datetime.fromtimestamp(txn.timestamp / 1000)}  ${txn.amount}"
+                f"{datetime.fromtimestamp(txn.timestamp / 1000, tz=timezone.utc)}  ${txn.amount}"
             )
         print(f"{len(top_results)} transaction(s) retrieved in {elapsed_ms:,.0f}ms\n")
 
-    def get_top_results(self, session: SyncSession, count: int, account_id: str) -> List[Transaction]:
+    def get_top_results(self, session: SyncSession, count: int, account_id: str) -> list[Transaction]:
         """Return an account's most recent transactions across both DC maps, newest first.
 
         ../../java-sdk merges the two per-DC maps and takes the top N as a single AEL read
@@ -188,7 +187,7 @@ class TopTransactionsAcrossDcs(UseCase):
         if record is None:
             return []
 
-        merged: Dict[str, str] = {}
+        merged: dict[str, str] = {}
         merged.update(record.bins.get(BIN_DC1) or {})
         merged.update(record.bins.get(BIN_DC2) or {})
         if not merged:
@@ -200,7 +199,7 @@ class TopTransactionsAcrossDcs(UseCase):
 
         keys = [TRANSACTIONS.id(tid) for tid in txn_ids]
         txn_stream = session.query(keys).execute()
-        txns: List[Transaction] = []
+        txns: list[Transaction] = []
         for row in txn_stream:
             if row.is_ok and row.record is not None:
                 txns.append(Transaction.from_bins(row.record.bins))

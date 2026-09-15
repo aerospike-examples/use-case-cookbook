@@ -5,7 +5,6 @@ command reference, which applies unchanged here.
 
 import re
 import shutil
-from typing import List, Optional
 
 from aerospike_sdk import SyncSession
 
@@ -18,11 +17,11 @@ from usecasecookbook.use_case_executor import UseCaseExecutor
 class InteractiveMenu:
     def __init__(self, session: SyncSession):
         self.executor = UseCaseExecutor(session)
-        self.filtered_use_cases: List[UseCase] = list(registry.get_all_use_cases())
-        self.current_search_term: Optional[str] = None
+        self.filtered_use_cases: list[UseCase] = list(registry.get_all_use_cases())
+        self.current_search_term: str | None = None
         self.is_regex_search = False
 
-    def run_menu(self, width: Optional[int] = None) -> None:
+    def run_menu(self, width: int | None = None) -> None:
         if width is None:
             width = shutil.get_terminal_size(fallback=(200, 24)).columns
 
@@ -106,7 +105,7 @@ class InteractiveMenu:
         return f"| {self._format_colors(index_str, fmt)} | {self._format_colors(name_str, fmt)} | {self._format_colors(desc_str, fmt)} |"
 
     @staticmethod
-    def _form_tags_string(tags: List[str], color: str) -> str:
+    def _form_tags_string(tags: list[str], color: str) -> str:
         parts = [f"{c.REVERSE}{tag}{c.RESET}{color}" for tag in tags]
         return "Tags: " + " ".join(parts)
 
@@ -164,8 +163,8 @@ class InteractiveMenu:
         return uc.get_description()
 
     @staticmethod
-    def _wrap_text(text: str, width: int) -> List[str]:
-        lines: List[str] = []
+    def _wrap_text(text: str, width: int) -> list[str]:
+        lines: list[str] = []
         for paragraph in text.split("\n"):
             current_line = ""
             for word in paragraph.split():
@@ -200,7 +199,7 @@ class InteractiveMenu:
             pattern = re.compile(re.escape(self.current_search_term), re.IGNORECASE)
         return pattern.sub(lambda m: f"{c.HIGHLIGHT}{m.group()}{c.RESET}{preserve_color}", text)
 
-    def _search_use_cases(self, search_term: Optional[str], use_regex: bool) -> None:
+    def _search_use_cases(self, search_term: str | None, use_regex: bool) -> None:
         self.current_search_term = search_term
         self.is_regex_search = use_regex
 

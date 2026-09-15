@@ -22,20 +22,22 @@ so the bin-name bookkeeping can't be recovered by inspecting an ``Operation`` af
 - the caller already knows the bin name (it built the ``Operation`` from it), so this costs
 nothing at the call site while letting the reducer do the same counting the legacy client did.
 
-Raw ``Operation`` objects are merged into one write via ``WriteSegmentBuilder._add_op`` - there is
-no public "append pre-built Operation" method (unlike the legacy/Java-SDK clients' public
-``operate(...)``/``appendOperations(...)``), so this uses that one leading-underscore method,
-which mirrors exactly what the public bin-builder chain (``.bin(x).add(1)``) does internally.
+Raw ``Operation`` objects are merged into one write via ``WriteSegmentBuilder.add_operation`` -
+the public equivalent of the legacy/Java-SDK clients' ``operate(...)``/``appendOperations(...)``,
+even though its one-line docstring ("used by CDT action builders") undersells that it's meant for
+exactly this. Unlike the chainable ``.bin(x).add(1)`` builder methods, ``add_operation`` mutates
+the builder in place and returns ``None`` rather than ``self``.
 """
 
 import threading
 import time
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from collections.abc import Sequence
+from typing import Any
 
 from aerospike_async import Key, Operation
 from aerospike_sdk import SyncSession
 
-BinOp = Tuple[str, Operation]
+BinOp = tuple[str, Operation]
 
 
 class IllegalStateError(RuntimeError):
@@ -45,14 +47,14 @@ class IllegalStateError(RuntimeError):
 class _PendingResult:
     """A simple thread-safe single-value future - stands in for Java's CompletableFuture."""
 
-    __slots__ = ("_event", "_value", "_error")
+    __slots__ = ("_error", "_event", "_value")
 
     def __init__(self) -> None:
         self._event = threading.Event()
-        self._value: Optional[Dict[str, Any]] = None
-        self._error: Optional[Exception] = None
+        self._value: dict[str, Any] | None = None
+        self._error: Exception | None = None
 
-    def finish(self, value: Optional[Dict[str, Any]]) -> None:
+    def finish(self, value: dict[str, Any] | None) -> None:
         self._value = value
         self._event.set()
 
@@ -60,7 +62,7 @@ class _PendingResult:
         self._error = error
         self._event.set()
 
-    def wait(self) -> Optional[Dict[str, Any]]:
+    def wait(self) -> dict[str, Any] | None:
         self._event.wait()
         if self._error is not None:
             raise self._error
@@ -68,7 +70,7 @@ class _PendingResult:
 
 
 class _SubmittedOp:
-    __slots__ = ("bin_name", "operation", "bin_index")
+    __slots__ = ("bin_index", "bin_name", "operation")
 
     def __init__(self, bin_name: str, operation: Operation, bin_index: int) -> None:
         self.bin_name = bin_name
@@ -84,19 +86,19 @@ class _SubmittedOps:
     ops sharing the same bin name across the whole batch.
     """
 
-    __slots__ = ("pending", "ops", "this_bin_counts")
+    __slots__ = ("ops", "pending", "this_bin_counts")
 
-    def __init__(self, pending: _PendingResult, all_bin_counts: Dict[str, int], bin_ops: Sequence[BinOp]) -> None:
+    def __init__(self, pending: _PendingResult, all_bin_counts: dict[str, int], bin_ops: Sequence[BinOp]) -> None:
         self.pending = pending
-        self.ops: List[_SubmittedOp] = []
-        self.this_bin_counts: Dict[str, int] = {}
+        self.ops: list[_SubmittedOp] = []
+        self.this_bin_counts: dict[str, int] = {}
         for bin_name, operation in bin_ops:
             bin_index = all_bin_counts.get(bin_name, 0)
             all_bin_counts[bin_name] = bin_index + 1
             self.this_bin_counts[bin_name] = self.this_bin_counts.get(bin_name, 0) + 1
             self.ops.append(_SubmittedOp(bin_name, operation, bin_index))
 
-    def finish(self, aggregated_bins: Dict[str, Any], all_bin_counts: Dict[str, int]) -> None:
+    def finish(self, aggregated_bins: dict[str, Any], all_bin_counts: dict[str, int]) -> None:
         """Extract this caller's slice of the combined result.
 
         Mirrors the legacy client's ``SubmittedOps.formRecordForTheseOps``: a bin touched once
@@ -104,7 +106,7 @@ class _SubmittedOps:
         a list (in submission order) and each caller picks out its own index (or indices, if the
         same caller touched the same bin more than once in its own submission).
         """
-        result: Dict[str, Any] = {}
+        result: dict[str, Any] = {}
         for op in self.ops:
             total_count = all_bin_counts.get(op.bin_name, 0)
             this_count = self.this_bin_counts.get(op.bin_name, 0)
@@ -134,14 +136,14 @@ class _OperationBatch:
     __slots__ = ("all_bin_counts", "calls")
 
     def __init__(self) -> None:
-        self.all_bin_counts: Dict[str, int] = {}
-        self.calls: List[_SubmittedOps] = []
+        self.all_bin_counts: dict[str, int] = {}
+        self.calls: list[_SubmittedOps] = []
 
     def submit_call(self, pending: _PendingResult, bin_ops: Sequence[BinOp]) -> None:
         self.calls.append(_SubmittedOps(pending, self.all_bin_counts, bin_ops))
 
-    def all_operations(self) -> List[Operation]:
-        ops: List[Operation] = []
+    def all_operations(self) -> list[Operation]:
+        ops: list[Operation] = []
         for call in self.calls:
             ops.extend(sop.operation for sop in call.ops)
         return ops
@@ -149,7 +151,7 @@ class _OperationBatch:
     def is_single_call(self) -> bool:
         return len(self.calls) == 1
 
-    def finish(self, aggregated_bins: Dict[str, Any]) -> None:
+    def finish(self, aggregated_bins: dict[str, Any]) -> None:
         for call in self.calls:
             call.finish(aggregated_bins, self.all_bin_counts)
 
@@ -159,7 +161,7 @@ class _OperationBatch:
 
 
 class _KeyStats:
-    __slots__ = ("expiry_ms", "counter")
+    __slots__ = ("counter", "expiry_ms")
 
     def __init__(self) -> None:
         self.expiry_ms = 0
@@ -175,14 +177,14 @@ class _ReducerMonitor:
     def __init__(self, accesses_per_ms_for_hot: int, ms_to_keep_hot: int) -> None:
         self._accesses_per_ms_for_hot = accesses_per_ms_for_hot
         self._ms_to_keep_hot = ms_to_keep_hot
-        self._current: Dict[str, _KeyStats] = {}
-        self._previous: Dict[str, _KeyStats] = {}
+        self._current: dict[str, _KeyStats] = {}
+        self._previous: dict[str, _KeyStats] = {}
         self._lock = threading.Lock()
         self.hot_key_accesses = 0
         self.non_hot_key_accesses = 0
 
         self._stop = threading.Event()
-        self._time_tracker_thread: Optional[threading.Thread] = None
+        self._time_tracker_thread: threading.Thread | None = None
         if accesses_per_ms_for_hot > 1:
             self._time_tracker_thread = threading.Thread(target=self._time_tracker, daemon=True)
             self._time_tracker_thread.start()
@@ -276,7 +278,7 @@ class HotKeyReducer:
         self._delay_secs = delay_secs
         self._monitor = _ReducerMonitor(accesses_per_ms_for_hot, ms_to_keep_hot)
         # Keyed by key.digest (a hashable str), not Key itself - see _ReducerMonitor.
-        self._batches: Dict[str, _OperationBatch] = {}
+        self._batches: dict[str, _OperationBatch] = {}
         self._batches_lock = threading.Lock()
 
         start = time.monotonic()
@@ -301,7 +303,7 @@ class HotKeyReducer:
             raise IllegalStateError(f"No batch found for key {key} - this is a HotKeyReducer bug.")
         return batch
 
-    def submit(self, key: Key, *bin_ops: BinOp) -> Optional[Dict[str, Any]]:
+    def submit(self, key: Key, *bin_ops: BinOp) -> dict[str, Any] | None:
         """Submits operations for execution, batching them with other operations for the same
         key if it's determined to be hot. Blocks until the operation (or its batch) executes.
 
@@ -313,12 +315,12 @@ class HotKeyReducer:
             This caller's slice of the (possibly merged) result, or ``None`` if no bin came back.
         """
         pending = _PendingResult()
-        batch_owned: Optional[_OperationBatch] = None
+        batch_owned: _OperationBatch | None = None
         try:
             if not self._monitor.use_reducer(key):
                 builder = self._session.upsert(key)
                 for _, op in bin_ops:
-                    builder = builder._add_op(op)
+                    builder.add_operation(op)
                 record_result = builder.execute().first()
                 bins = record_result.record.bins if record_result is not None and record_result.record is not None else None
                 pending.finish(bins if bins else None)
@@ -327,14 +329,14 @@ class HotKeyReducer:
                 batch_owned = self._take_batch(key)
                 builder = self._session.upsert(key)
                 for op in batch_owned.all_operations():
-                    builder = builder._add_op(op)
+                    builder.add_operation(op)
                 record_result = builder.execute().first()
                 bins = record_result.record.bins if record_result is not None and record_result.record is not None else {}
                 if batch_owned.is_single_call():
                     pending.finish(bins if bins else None)
                 else:
                     batch_owned.finish(bins)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - propagates to whichever caller(s) are waiting, see _PendingResult.fail
             if batch_owned is not None:
                 batch_owned.fail(e)
             else:

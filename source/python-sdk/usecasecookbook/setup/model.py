@@ -6,8 +6,8 @@ to convert to/from the dict a record's bins are represented as.
 """
 
 from dataclasses import dataclass
-from datetime import datetime
-from typing import Any, Dict
+from datetime import datetime, timezone
+from typing import Any
 
 
 @dataclass
@@ -17,7 +17,7 @@ class Account:
     balance_in_cents: int
     date_opened: datetime
 
-    def to_bins(self) -> Dict[str, Any]:
+    def to_bins(self) -> dict[str, Any]:
         return {
             "id": self.id,
             "accountName": self.account_name,
@@ -26,10 +26,10 @@ class Account:
         }
 
     @staticmethod
-    def from_bins(bins: Dict[str, Any]) -> "Account":
+    def from_bins(bins: dict[str, Any]) -> "Account":
         return Account(
             id=bins["id"],
             account_name=bins["accountName"],
             balance_in_cents=bins["balanceInCents"],
-            date_opened=datetime.fromtimestamp(bins["dateOpened"]),
+            date_opened=datetime.fromtimestamp(bins["dateOpened"], tz=timezone.utc),
         )

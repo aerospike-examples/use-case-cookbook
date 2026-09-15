@@ -1,7 +1,7 @@
 """Mirrors ../../../java-sdk's gaming/model/Player.java."""
 
 from dataclasses import dataclass
-from typing import Any, Dict
+from typing import Any
 
 
 @dataclass
@@ -16,7 +16,7 @@ class Player:
     being_attacked_by: str
     score: int
 
-    def to_bins(self) -> Dict[str, Any]:
+    def to_bins(self) -> dict[str, Any]:
         return {
             "id": self.id,
             "userName": self.user_name,
@@ -30,7 +30,7 @@ class Player:
         }
 
     @staticmethod
-    def from_bins(bins: Dict[str, Any]) -> "Player":
+    def from_bins(bins: dict[str, Any]) -> "Player":
         return Player(
             id=bins["id"],
             user_name=bins["userName"],

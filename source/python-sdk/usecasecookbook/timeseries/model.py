@@ -9,7 +9,7 @@ dataclass-mapped records elsewhere in this cookbook (see setup/model.py).
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 
 @dataclass
@@ -28,15 +28,15 @@ class Event:
     id: str
     account_id: str
     device_id: str
-    timestamp: Optional[datetime]
-    parameters: Optional[Dict[str, Any]] = None
-    resolution: Optional[List[int]] = None
-    video_meta: Optional[Dict[str, Any]] = None
-    parameter_tags: Optional[List[str]] = None
-    partner_id: Optional[str] = None
-    partner_state_id: Optional[str] = None
+    timestamp: datetime | None
+    parameters: dict[str, Any] | None = None
+    resolution: list[int] | None = None
+    video_meta: dict[str, Any] | None = None
+    parameter_tags: list[str] | None = None
+    partner_id: str | None = None
+    partner_state_id: str | None = None
 
-    def to_map(self) -> Dict[str, Any]:
+    def to_map(self) -> dict[str, Any]:
         return {
             "id": self.id,
             "accountId": self.account_id,
@@ -51,7 +51,7 @@ class Event:
         }
 
     @staticmethod
-    def from_map(event_map: Dict[str, Any]) -> "Event":
+    def from_map(event_map: dict[str, Any]) -> "Event":
         timestamp_ms = event_map.get("timestamp")
         return Event(
             id=event_map.get("id"),

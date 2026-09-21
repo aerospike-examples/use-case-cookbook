@@ -97,28 +97,12 @@ class AdvancedExpressions(UseCase):
 
         self._multiple_commands_in_one_operation(session)
 
-        # A scalar path read needs an explicit type cast - the server can't infer the type of
-        # a single-element read from the path alone. The canonical AEL grammar spells this as
-        # a ":TYPE" path suffix (e.g. "$.acc.[0]:INT", same as ../../java-sdk uses) - but this
-        # SDK's currently-published package (aerospike-sdk==0.9.0a5) parses AEL strings with
-        # its own bundled, client-side grammar rather than sending them to the server for
-        # compilation, and that bundled grammar predates the ":TYPE" suffix convention
-        # entirely: EVERY ":TYPE" suffix fails to parse against it, not just this one
-        # (confirmed empirically: "$.acc.[0]:INT" raises AelParseException: line 1:9 mismatched
-        # input ':' expecting <EOF>). ".get(type: INT)" is that older, still-published
-        # package's own equivalent mechanism, and is what actually works against the version
-        # of this SDK anyone gets from `pip install aerospike-sdk` today. The SDK's actively
-        # developed (but not yet publicly released) branch has since moved AEL compilation
-        # server-side and adopted the canonical ":TYPE" syntax - this line should switch to it
-        # once that lands in a published release.
-        #
-        # append(10) can't be expressed in AEL on this package either way - its grammar only
-        # accepts a bare, argument-less "append()" path function ("$.acc.append(10)" raises
-        # AelParseException: line 1:12 mismatched input '(' expecting '()'), and the canonical
-        # grammar's write-shaped path terminals (§13 of the canonical AEL reference) aren't
-        # reachable from string AEL in this package regardless of the type-suffix issue above -
-        # so the append itself uses the native CDT builder; only the typed read-back into
-        # "counter" uses AEL.
+        # A scalar path read needs an explicit get(type: ...) suffix - the server can't infer
+        # the type of a single-element read from the path alone. append(10) can't be expressed
+        # in this SDK's AEL (its grammar only accepts a bare, argument-less "append()" path
+        # function - "$.acc.append(10)" raises AelParseException: line 1:12 mismatched input
+        # '(' expecting '()'), so the append itself uses the native CDT builder; only the
+        # typed read-back into "counter" uses AEL, same as ../../java-sdk's "$.acc.[0]:INT".
         key = CARS.id(1)
         session.upsert(key) \
             .bin("acc").list_create(ListOrderType.UNORDERED) \
@@ -139,16 +123,11 @@ class AdvancedExpressions(UseCase):
     def _multiple_commands_in_one_operation(self, session: SyncSession) -> None:
         """../../java-sdk adds all 4 conditional features in ONE write via a 4-level nested
         AEL ``let``/``when`` expression, each branch appending a string with
-        ``$.features.append('...')``. The canonical AEL grammar supports exactly this
-        (``$.tags.append('new')`` is a documented example of a write-shaped path terminal in
-        the canonical AEL grammar's path-write-terminal section) and it's what ../../java-sdk
-        uses. It's not
-        portable to the currently-published ``aerospike-sdk==0.9.0a5`` package, though: that
-        package's bundled client-side AEL parser only recognizes a bare, argument-less
-        ``append()`` path function (confirmed empirically - passing an argument raises the same
-        ``AelParseException`` as the ``acc``/``counter`` demo above) - this is the same
-        stale-local-grammar issue documented there, not a difference in what canonical AEL
-        itself supports.
+        ``$.features.append('...')``. That's not portable here: this SDK's AEL grammar
+        only recognizes a bare, argument-less ``append()`` path function (confirmed via the
+        ANTLR grammar and empirically - passing an argument raises the same
+        ``AelParseException`` as the ``acc``/``counter`` demo above), so AEL cannot itself
+        mutate a list bin in this SDK version; it's read-only for CDT writes.
 
         The nested ``let``/``when`` composition to *evaluate* the 4 conditions works fine
         (verified against a live cluster: color/bodyType/engineSize/year all correctly

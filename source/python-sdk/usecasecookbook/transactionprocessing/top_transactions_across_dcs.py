@@ -166,14 +166,11 @@ class TopTransactionsAcrossDcs(UseCase):
 
         ../../java-sdk merges the two per-DC maps and takes the top N as a single AEL read
         (``let (merged = $.dc1.putItems($.dc2)) then ((${merged}).{-N:})``, wrapped in a
-        ``when`` for a DC bin that doesn't exist yet). ``putItems`` is a standard canonical AEL
-        map-write terminal, not a Java-SDK-specific construct, but the currently-published
-        ``aerospike-sdk==0.9.0a5`` package's client-side AEL parser predates it - confirmed via
-        its bundled grammar (there is no ``putItems`` token anywhere in ``Condition.g4``) and
-        empirically: running that exact expression through ``select_from`` raises
-        ``AelParseException: line 1:28 no viable alternative at input 'let(merged=$.dc1.putItems('``
-        (see ``../README.md``'s "Expressions: AEL" section for why - the same stale-local-grammar
-        issue documented there, not a permanent gap in the language). So the merge is done
+        ``when`` for a DC bin that doesn't exist yet). This SDK's AEL grammar has no
+        equivalent map-merge path function - confirmed via the ANTLR grammar (there is no
+        ``putItems`` token anywhere in ``Condition.g4``) and empirically: running that exact
+        expression through ``select_from`` raises ``AelParseException: line 1:28 no viable
+        alternative at input 'let(merged=$.dc1.putItems('``. So the merge is done
         client-side here instead: read the account record (both DC maps come back as plain
         dicts keyed by the same zero-padded "timestamp-id" string used to write them, so
         string order == chronological order), merge the two dicts, sort the combined keys

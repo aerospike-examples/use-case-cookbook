@@ -22,7 +22,9 @@ increment (``.add(...)``) or any other CDT write, without the caller ever needin
 the resulting value up front. Python has no standalone ``Operation`` value type to inspect
 bin names from the way Java does, so the bin list is passed explicitly instead of derived.
 
-This SDK's AEL grammar has no write-shaped terminals (see ``../README.md``), so the
+The canonical AEL grammar does have write-shaped path terminals (``setTo``, ``putItems``,
+``remove``, etc. - see ``../README.md``), but the currently-published ``aerospike-sdk==0.9.0a5``
+package's client-side AEL parser doesn't implement them, so the
 server-side snapshot/compare/versions-bookkeeping expressions here are built with
 ``aerospike_sdk.Exp`` (``FilterExpression``) instead - a near-complete
 ``Exp``/``MapExp``/``ListExp``-equivalent builder, confirmed by testing against a live

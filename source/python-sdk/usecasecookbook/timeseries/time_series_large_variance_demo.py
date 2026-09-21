@@ -18,8 +18,7 @@ record, gated by ``where()`` so the whole operate() is a no-op if another writer
 the split (or the bucket has since shrunk back under the threshold). The java-sdk port does this
 as a single ``when(...)`` AEL expression mixing a conditional read (``select_from``) and a
 conditional write (``upsert_from``) of the same condition in one round trip. Attempting the direct
-equivalent here - a ``when(count >= N => ....remove(), default => ....get(return: UNORDERED_MAP))``
-expression written via ``upsert_from`` - fails server-side:
+equivalent here fails server-side:
 
     session.upsert(key).bin("map").upsert_from(
         "when ($.map.{}.count() >= 10 => $.map.{-2:}.remove(), "
@@ -27,19 +26,28 @@ expression written via ``upsert_from`` - fails server-side:
     ).execute()
     -> AerospikeError: Code: ParameterError, ...
 
-(mixing a mutating path function - ``remove()`` - with a value-producing one - ``get(...)`` - as
-alternate ``when()`` branches is rejected server-side; each branch of a ``when()`` must be a pure
-value expression). So this port instead uses the ``where()`` clause on the whole write segment as
-the overflow gate, and issues the minority read (cross-bin, so it still needs an AEL
-``select_from``) and the majority removal (same-bin, so a native CDT ``on_map_index_range(...)
-.remove()`` op) as two ops in that one gated call - still one atomic round trip, just built from
-two simpler pieces instead of one `when()` expression.
+Note ``get(return: UNORDERED_MAP)`` here isn't canonical AEL syntax either - the canonical
+grammar's terminal for this is ``getMaps():UNORDERED`` (a postfix flag on the read terminal, not
+a named parameter), matching the ``.get(type: X)`` vs ``:TYPE`` divergence documented in
+../advancedexpressions/advanced_expressions.py. Since the currently-published
+``aerospike-sdk==0.9.0a5`` package's client-side parser can't parse any ``:TYPE``/postfix-flag
+suffix at all, the canonical form can't be tested against it either, so whether the underlying
+"a ``when()`` branch can't be a mutating path function like ``remove()``" claim would still hold
+under correct canonical syntax is genuinely unverified here - not confirmed, not ruled out. Either
+way, this port uses the ``where()`` clause on the whole write segment as the overflow gate, and
+issues the minority read (cross-bin, so it still needs an AEL ``select_from``) and the majority
+removal (same-bin, so a native CDT ``on_map_index_range(...).remove()`` op) as two ops in that one
+gated call - still one atomic round trip, just built from two simpler pieces instead of one
+``when()`` expression.
 
 The split point (``MINOR_SPLIT_ITEMS``) is a fixed item count rather than a percentage of the
 bucket's current size: like the java-sdk port, a computed bound (e.g. ``count() * 80 / 100``)
-isn't expressible - the map/list range selectors in this SDK's AEL grammar
+isn't expressible - this one *is* a genuine, version-independent canonical-grammar constraint
+("Selector operands are static literals only... not parenthesised expressions", canonical AEL
+reference §4.2/§5/§6, explicitly marked "will change in a later release" rather than being an
+artifact of this package's stale local parser), confirmed by this SDK's own bundled grammar
 (``aerospike_sdk/ael/antlr4/Condition.g4``, ``indexRangeIdentifier: start ':' end``, where
-``start``/``end`` are ``signedInt`` - i.e. integer literal tokens) require static literal bounds.
+``start``/``end`` are ``signedInt`` - i.e. integer literal tokens only) agreeing with it.
 """
 
 import random

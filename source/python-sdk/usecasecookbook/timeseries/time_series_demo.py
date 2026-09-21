@@ -5,15 +5,23 @@ per bucket); each record holds a key-ordered map from a time-sortable ``eventId`
 key-range operations.
 
 Device filtering: the java-sdk port pushes device filtering down server-side with a single AEL
-expression combining a map key-range selector with a ``[?(...)]`` filter clause on the loop
-variable (a Java-SDK-only construct). This SDK's AEL grammar
-(``aerospike_sdk/ael/antlr4/Condition.g4``) has no filter-clause construct at all - confirmed
-empirically against a live cluster, attempting the closest equivalent:
+expression combining a map key-range selector with a ``&[?(...)]`` filter-chain clause (canonical
+AEL grammar §4.4 - a standard construct, not Java-SDK-specific, despite an earlier version of
+this comment claiming otherwise). The currently-published ``aerospike-sdk==0.9.0a5`` package
+can't run it, though: that package parses AEL strings with its own bundled, client-side grammar
+(``aerospike_sdk/ael/antlr4/Condition.g4``) rather than sending them to the server for
+compilation, and that bundled grammar predates the filter-chain construct entirely - confirmed
+empirically against a live cluster:
 
     session.query(key).bin("map").select_from(
         "$.map.{lo-hi}&[?(@.[0] in ['dev1','dev2'])]"
     ).execute()
     -> AelParseException: line 1:17 token recognition error at: '?('
+
+The SDK's actively developed (but not yet publicly released) branch has since moved AEL
+compilation server-side and supports this construct - this is the same stale-local-grammar
+situation as the type-suffix gap documented in ../advancedexpressions/advanced_expressions.py,
+not a permanent limitation of the language.
 
 So this port fetches the eventId range server-side via the native ``on_map_key_range(...)
 .get_values()`` CDT operation (no AEL needed for the no-device-filter case - and actually a

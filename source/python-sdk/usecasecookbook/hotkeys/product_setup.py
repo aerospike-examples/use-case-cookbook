@@ -3,14 +3,14 @@ HotKeyProduct records used by all hot-key use cases.
 """
 
 from aerospike_async import Key
-from aerospike_sdk import SyncSession
+from aerospike_sdk.sync import Session
 
 from usecasecookbook.hotkeys import keys as hot_key_keys
 from usecasecookbook.hotkeys.model import HotKeyProduct
 from usecasecookbook.hotkeys.simulation import HOT_PRODUCT_ID
 
 
-def truncate_and_seed(session: SyncSession, replica_count: int) -> None:
+def truncate_and_seed(session: Session, replica_count: int) -> None:
     session.truncate(hot_key_keys.PRODUCTS)
 
     product = HotKeyProduct(HOT_PRODUCT_ID, "SKU-1000", "Generic demo product for hot-key simulations", 0)
@@ -24,7 +24,7 @@ def truncate_and_seed(session: SyncSession, replica_count: int) -> None:
         session.upsert(hot_key_keys.replica(HOT_PRODUCT_ID, i)).put(product.to_bins()).execute()
 
 
-def read_units_sold(session: SyncSession, key: Key) -> int:
+def read_units_sold(session: Session, key: Key) -> int:
     """Reads ``unitsSold`` from a single key, failing clearly if the record isn't seeded yet."""
     stream = session.query(key).execute()
     try:
@@ -36,7 +36,7 @@ def read_units_sold(session: SyncSession, key: Key) -> int:
         stream.close()
 
 
-def read_merged_units_sold(session: SyncSession, replica_count: int) -> int:
+def read_merged_units_sold(session: Session, replica_count: int) -> int:
     """Batch-reads ``unitsSold`` from every shard key (``productId:0..N-1``) and returns the
     sum - the logical total after sharded writes.
     """
@@ -52,7 +52,7 @@ def read_merged_units_sold(session: SyncSession, replica_count: int) -> int:
     return total
 
 
-def increment_units_sold_on_all_copies(session: SyncSession, replica_count: int) -> None:
+def increment_units_sold_on_all_copies(session: Session, replica_count: int) -> None:
     """Increments ``unitsSold`` on the primary key and every replica in a single batch write so
     all copies stay in sync.
     """

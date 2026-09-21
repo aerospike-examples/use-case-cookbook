@@ -8,7 +8,8 @@ import random
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from aerospike_sdk import DataSet, SyncSession
+from aerospike_sdk import DataSet
+from aerospike_sdk.sync import Session
 
 from usecasecookbook import config
 from usecasecookbook.setup.model import Account
@@ -42,7 +43,7 @@ class SetupDemo(UseCase):
     def get_reference(self) -> str:
         return "https://github.com/aerospike-examples/use-case-cookbook/blob/main/UseCases/setup.md"
 
-    def setup(self, session: SyncSession) -> None:
+    def setup(self, session: Session) -> None:
         session.truncate(ACCOUNTS)
 
         print(f"Generating {NUM_ACCOUNTS:,} accounts...")
@@ -51,7 +52,7 @@ class SetupDemo(UseCase):
             session.upsert(ACCOUNTS.id(account.id)).put(account.to_bins()).execute()
         print("Setup complete!")
 
-    def run(self, session: SyncSession) -> None:
+    def run(self, session: Session) -> None:
         print("Query first 100 accounts")
         stream = session.query(ACCOUNTS).limit(100).execute()
         for row in stream:

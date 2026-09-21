@@ -35,7 +35,7 @@ from collections.abc import Sequence
 from typing import Any
 
 from aerospike_async import Key, Operation
-from aerospike_sdk import SyncSession
+from aerospike_sdk.sync import Session
 
 BinOp = tuple[str, Operation]
 
@@ -264,13 +264,13 @@ class HotKeyReducer:
     """Creates a HotKeyReducer with full configuration options.
 
     Args:
-        session: the SyncSession to use for the batched operate calls.
+        session: the Session to use for the batched operate calls.
         delay_secs: time to wait before executing batched operations (minimum 1 microsecond).
         accesses_per_ms_for_hot: minimum accesses per millisecond for a key to be considered hot.
         ms_to_keep_hot: duration in milliseconds to keep a key hot once detected.
     """
 
-    def __init__(self, session: SyncSession, delay_secs: float, accesses_per_ms_for_hot: int, ms_to_keep_hot: int) -> None:
+    def __init__(self, session: Session, delay_secs: float, accesses_per_ms_for_hot: int, ms_to_keep_hot: int) -> None:
         if delay_secs < 1e-6:
             raise ValueError(f"Delay time must be at least 1us, not {delay_secs}s")
 

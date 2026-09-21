@@ -44,8 +44,8 @@ from aerospike_sdk import (
     ExpType,
     ListReturnType,
     MapReturnType,
-    SyncSession,
 )
+from aerospike_sdk.sync import Session
 
 from usecasecookbook import config
 from usecasecookbook.recordversioning.model import TradeBase
@@ -216,10 +216,10 @@ class DeltaVersioningRecords(UseCase):
         return "https://github.com/aerospike-examples/use-case-cookbook/blob/main/UseCases/versioning-records-delta.md"
 
     def _update_trade_base_with_delta(
-        self, session: SyncSession, trade_id: int, timestamp: float, description: str, user: str,
+        self, session: Session, trade_id: int, timestamp: float, description: str, user: str,
         changed_bins: list[str], apply_ops: ApplyOps,
     ) -> int:
-        def _op(tx: SyncSession) -> int:
+        def _op(tx: Session) -> int:
             key = TRADE_BASES.id(trade_id)
             change_ts = int(timestamp) if timestamp else _now_millis()
 
@@ -280,7 +280,7 @@ class DeltaVersioningRecords(UseCase):
 
         return run_in_transaction(session, _op)
 
-    def _get_audit_trail(self, session: SyncSession, trade_id: int) -> list[dict[str, object]]:
+    def _get_audit_trail(self, session: Session, trade_id: int) -> list[dict[str, object]]:
         current = session.query(TRADE_BASES.id(trade_id)).execute().first()
         current_version = current.record.bins["version"]
         trail = []
@@ -290,7 +290,7 @@ class DeltaVersioningRecords(UseCase):
                 trail.append(row.record.bins)
         return trail
 
-    def _reconstruct_at_version(self, session: SyncSession, trade_id: int, target_version: int) -> dict[str, object]:
+    def _reconstruct_at_version(self, session: Session, trade_id: int, target_version: int) -> dict[str, object]:
         reconstructed: dict[str, object] = {}
         for version in range(target_version + 1):
             row = session.query(_delta_key(trade_id, version)).execute().first()
@@ -305,14 +305,14 @@ class DeltaVersioningRecords(UseCase):
         reconstructed["version"] = target_version
         return reconstructed
 
-    def _print_audit_trail(self, session: SyncSession, trade_id: int) -> None:
+    def _print_audit_trail(self, session: Session, trade_id: int) -> None:
         print(f"Audit trail for TradeBase id {trade_id}:")
         for bins in self._get_audit_trail(session, trade_id):
             print(f"  Delta v{bins['deltaVer']} at {bins['changeTs']} by {bins['user']}: {bins['description']}")
             for change in bins.get("changes") or []:
                 print(f"    {change['binName']}: {change['status']}")
 
-    def setup(self, session: SyncSession) -> None:
+    def setup(self, session: Session) -> None:
         session.truncate(TRADE_BASES)
 
         print(f"Generating {NUM_RECORDS:,} trades")
@@ -332,7 +332,7 @@ class DeltaVersioningRecords(UseCase):
                 session, trade_id, _now_millis(), "Initial insert", "setup", changed_bins, _insert_ops,
             )
 
-    def run(self, session: SyncSession) -> None:
+    def run(self, session: Session) -> None:
         trade_id = 2
 
         # An increment - the caller never learns (or needs to supply) the resulting value;

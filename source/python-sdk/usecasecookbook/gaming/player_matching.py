@@ -20,8 +20,8 @@ from datetime import datetime, timezone
 
 from aerospike_async import Key
 from aerospike_async.exceptions import ResultCode
-from aerospike_sdk import SyncSession
 from aerospike_sdk.exceptions import AerospikeError
+from aerospike_sdk.sync import Session
 
 from usecasecookbook.async_util import Async
 from usecasecookbook.gaming.leaderboard import PLAYERS, SCOREBOARD, Leaderboard
@@ -90,7 +90,7 @@ class PlayerMatching(UseCase):
             "their opponents 80% of the time. If a player with a shield attacks during a shield, the shield is removed."
         )
 
-    def setup(self, session: SyncSession) -> None:
+    def setup(self, session: Session) -> None:
         session.truncate(PLAYERS)
         session.truncate(SCOREBOARD)
 
@@ -100,7 +100,7 @@ class PlayerMatching(UseCase):
             session.upsert(PLAYERS.id(player.id)).put(player.to_bins()).execute()
             self.leaderboard.update_player_score(session, player.id, -1, player.score)
 
-    def run(self, session: SyncSession) -> None:
+    def run(self, session: Session) -> None:
         self.test_eligibility(session)
 
         print("\nLet's play some games!")
@@ -140,7 +140,7 @@ class PlayerMatching(UseCase):
         self.set_player_online(session, player1.id, False)
 
     def find_player_to_attack_by_keys(
-        self, session: SyncSession, attacker_id: int, possibilities: list[Key],
+        self, session: Session, attacker_id: int, possibilities: list[Key],
     ) -> Player | None:
         """Finds a player to attack from a list of candidate keys: batch-reads them
         filtered down to eligible players, then tries each (randomly) with a filtered
@@ -184,7 +184,7 @@ class PlayerMatching(UseCase):
                 return Player.from_bins(row.record.bins)
         return None
 
-    def find_player_to_attack(self, session: SyncSession, attacker: Player) -> Player | None:
+    def find_player_to_attack(self, session: Session, attacker: Player) -> Player | None:
         """Given an attacker, finds a player of similar strength who is available to
         attack. The player will already have been locked for attacking.
         """
@@ -192,7 +192,7 @@ class PlayerMatching(UseCase):
         keys = [self.get_player_key(e.id) for e in similar_scores if e.id != attacker.id]
         return self.find_player_to_attack_by_keys(session, attacker.id, keys)
 
-    def play_game(self, session: SyncSession, attacker: Player, defender: Player, show_battle: bool) -> None:
+    def play_game(self, session: Session, attacker: Player, defender: Player, show_battle: bool) -> None:
         """Plays a game between an attacker and a defender, adjusting scores, shield,
         and leaderboard.
         """
@@ -226,7 +226,7 @@ class PlayerMatching(UseCase):
         attacker.shield_expiry = 0
         defender.being_attacked_by = None
 
-        def op(tx: SyncSession) -> None:
+        def op(tx: Session) -> None:
             self.leaderboard.update_player_score(tx, attacker.id, original_attacker_score, attacker.score)
             self.leaderboard.update_player_score(tx, defender.id, original_defender_score, defender.score)
 
@@ -256,7 +256,7 @@ class PlayerMatching(UseCase):
     def get_player_key(self, id: int) -> Key:
         return PLAYERS.id(id)
 
-    def set_player_online(self, session: SyncSession, player_id: int, is_online: bool) -> Player | None:
+    def set_player_online(self, session: Session, player_id: int, is_online: bool) -> Player | None:
         """Sets a player online and returns their details, or ``None`` if ``is_online``
         is true and the player was already online.
         """
@@ -281,7 +281,7 @@ class PlayerMatching(UseCase):
             return None
         return Player.from_bins(row.record.bins)
 
-    def reset_player_to(self, session: SyncSession, player_id: int, score: int) -> None:
+    def reset_player_to(self, session: Session, player_id: int, score: int) -> None:
         """Resets a player to offline, no shield, not being attacked. Sets the score
         too if ``score >= 0``.
         """
@@ -295,7 +295,7 @@ class PlayerMatching(UseCase):
             builder = builder.bin("score").set_to(score)
         builder.execute()
 
-    def can_attack_player_test(self, session: SyncSession, player_id: int) -> bool:
+    def can_attack_player_test(self, session: Session, player_id: int) -> bool:
         """Determines if the player can currently be attacked. Not for real game play -
         the result could be stale by the time it's returned.
         """
@@ -315,7 +315,7 @@ class PlayerMatching(UseCase):
                 return False
             raise
 
-    def test_eligibility(self, session: SyncSession) -> int:
+    def test_eligibility(self, session: Session) -> int:
         player_id = 1
         row = session.query(self.get_player_key(player_id)).execute().first()
         if row is None or row.record is None:

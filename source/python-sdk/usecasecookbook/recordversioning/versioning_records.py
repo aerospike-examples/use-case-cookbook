@@ -24,7 +24,8 @@ from collections.abc import Callable
 from datetime import datetime, timezone
 
 from aerospike_async import MapOrder
-from aerospike_sdk import DataSet, SyncSession
+from aerospike_sdk import DataSet
+from aerospike_sdk.sync import Session
 
 from usecasecookbook import config
 from usecasecookbook.async_util import Async
@@ -92,7 +93,7 @@ class VersioningRecords(UseCase):
     def get_reference(self) -> str:
         return "https://github.com/aerospike-examples/use-case-cookbook/blob/main/UseCases/versioning-records.md"
 
-    def setup(self, session: SyncSession) -> None:
+    def setup(self, session: Session) -> None:
         session.truncate(TRADE_BASES)
         session.truncate(TRADE_CONTENTS)
 
@@ -111,10 +112,10 @@ class VersioningRecords(UseCase):
             session.upsert(TRADE_BASES.id(trade.id)).put(trade.to_bins()).execute()
 
     def _update_object_with_version(
-        self, session: SyncSession, dataset: DataSet, trade_id: int, timestamp: float,
+        self, session: Session, dataset: DataSet, trade_id: int, timestamp: float,
         handler: ChangeHandler,
     ) -> int:
-        def _op(tx: SyncSession) -> int:
+        def _op(tx: Session) -> int:
             unversioned_key = _form_key(dataset, trade_id)
             row = tx.query(unversioned_key).execute().first()
             bins = row.record.bins
@@ -155,7 +156,7 @@ class VersioningRecords(UseCase):
 
         return run_in_transaction(session, _op)
 
-    def _read_at_time(self, session: SyncSession, trade_id: int, timestamp: float) -> TradeBase | None:
+    def _read_at_time(self, session: Session, trade_id: int, timestamp: float) -> TradeBase | None:
         unversioned_key = _form_key(TRADE_BASES, trade_id)
 
         row = (
@@ -180,7 +181,7 @@ class VersioningRecords(UseCase):
         found = session.query(versioned_key).execute().first()
         return TradeBase.from_bins(found.record.bins)
 
-    def run(self, session: SyncSession) -> None:
+    def run(self, session: Session) -> None:
         def _run(async_runner: Async) -> None:
             def _fast_update() -> None:
                 trade_id = 2

@@ -8,13 +8,30 @@ examples in [`../java-sdk`](../java-sdk/README.md). The new SDK is currently **p
 
 ## Setup
 
-You need a running Aerospike cluster (see [`../java`](../java/README.md#setup) for pointers if you
-don't have one) and **Python 3.10–3.14**.
+You need **Python 3.11+** and a running Aerospike cluster on **build 8.2.0 or later** (see
+[`../java`](../java/README.md#setup) for general cluster-setup pointers) — this module's AEL usage
+requires server-side AEL compilation, only available from 8.2.0 onward (see "Expressions: AEL"
+below).
+
+**This module currently requires an Aerospike-internal package build**, not just public PyPI - see
+`requirements.txt` for why. If you're external to Aerospike, everything except AEL string filters
+still works against the plain public `aerospike-sdk` release; internal readers, generate a JFrog
+identity token (JFrog UI → avatar → *Edit Profile* → *Identity Tokens*; username is your Aerospike
+email) and put it in `~/.netrc`:
+
+```
+machine artifact.aerospike.io
+login you@aerospike.com
+password <your-identity-token>
+```
+
+then:
 
 ```
 cd source/python-sdk
-python3.12 -m venv .venv        # or any 3.10-3.14 interpreter
+python3.12 -m venv .venv        # or any 3.11+ interpreter
 source .venv/bin/activate
+export PIP_EXTRA_INDEX_URL="https://artifact.aerospike.io/artifactory/api/pypi/database-pypi-dev-local/simple/"
 pip install -r requirements.txt
 python main.py -uc "Demo setup"
 ```
@@ -53,56 +70,55 @@ bins are read/written directly as `dict`s, same as the other two modules' equiva
 There's no equivalent of the Java Object Generator wired up here either (same manual-install gap as
 `../java`) — sample data is hand-generated with the standard library `random` module instead.
 
-## Expressions: AEL, but read/filter-only
+## Expressions: AEL
 
-This SDK supports **AEL** (Aerospike Expression Language) via `.where(ael_string)` (query filters)
-and `.bin(x).select_from(ael_string)` (computed reads) — same idea as `../java-sdk`'s AEL support,
-but **this SDK's AEL grammar has no write-shaped path terminals at all** (no `.append()`,
-`.putItems()`, etc. — confirmed by testing, not assumed; see `advancedexpressions/advanced_expressions.py`).
-Where the Java SDK port does an atomic AEL write (e.g. `AdvancedExpressions`'s conditional
-feature-augmentation, or `TopTransactionsAcrossDcs`'s cross-DC map merge), this port instead reads
-the record, computes the new value in Python, and writes it back with the ordinary CDT builder API
-(`session.upsert(key).bin(x).list_append_items(...)`, etc.) — one extra round trip, no correctness
-loss, documented with a code comment at each such call site.
+This SDK supports **AEL** (Aerospike Expression Language) via `.where(ael_string)` (query filters),
+`.bin(x).select_from(ael_string)` (computed reads), and `.bin(x).upsert_from(ael_string)`/
+`insert_from`/`update_from` (computed writes) — the same canonical grammar `../java-sdk` uses,
+including type-suffix path pins (`$.bin:INT`), write-shaped path terminals (`.append(value)`,
+`.putItems(...)`, etc.), and wildcard/key-range filter chains (`&[?(...)]`). AEL strings are
+compiled **server-side** rather than parsed locally, which is why this needs Aerospike 8.2.0+ (see
+Setup above) and the internal SDK build pinned in `requirements.txt` - an earlier, now-corrected
+version of this doc described several of these as permanent gaps in this SDK's own AEL dialect;
+they weren't - they were artifacts of testing against `aerospike-sdk==0.9.0a5`'s bundled
+client-side parser, which predates server-side AEL compilation and implements an older, divergent
+local grammar. Every use case in this port that needed one of these constructs now uses genuine
+AEL for it (`advancedexpressions/advanced_expressions.py`'s single nested `let`/`when` write,
+`timeseries/time_series_demo.py`'s server-side device filter, `transactionprocessing/top_transactions_across_dcs.py`'s
+`putItems`-based cross-DC merge).
 
-**This is a gap in the AEL *string* grammar specifically, not in expression-based writes overall**:
+`recordversioning/delta_versioning_records.py` is the one deliberate exception: it uses the
+programmatic `aerospike_sdk.Exp` (`FilterExpression`) builder instead of AEL strings for its
+snapshot-and-compare technique, for the same reason `../java-sdk` does - a map key discovered at
+runtime by value can't address a write in AEL, since selector operands must be static literals.
 `select_from`/`insert_from`/`update_from`/`upsert_from` all accept `Union[str, FilterExpression]`,
-and `aerospike_sdk.exp.Exp` (`FilterExpression` from the underlying async client) is a full
-`Exp`/`MapExp`/`ListExp`-equivalent builder (`cond`, `def_`/`var`/`exp_let`, `bin_exists`,
-`bin_type`, `map_get_by_value`, `map_put`, `unknown`, etc.) — nearly 200 methods, comparable in
-breadth to the Java SDK's `Exp` API. A server-side conditional write is possible here by building a
-`FilterExpression` tree instead of an AEL string; none of this port's use cases needed to reach for
-it (see `recordversioning/delta_versioning_records.py`'s docstring for why it deliberately chose a
-simpler client-side diff over porting the Java SDK's `Exp`/`MapExp` snapshot-and-compare technique
-verbatim, rather than because the equivalent wasn't available here) - worth knowing about for future
-use cases that do need an atomic conditional write this SDK's CDT builder API alone can't express.
+so AEL strings and `Exp` trees can be freely mixed within one call - see that module's docstring.
 
-This SDK's AEL dialect is also its own — **not** the same grammar as `../java-sdk`'s (which has its
-own canonical reference at `../java-sdk/AEL_CANONICAL_REFERENCE.md`). Gotchas found while porting:
-- No filter-predicate/selector-then-filter construct (no `[?(...)]`-style clause) — a map key-range
-  selector can't be chained with a value filter server-side. `timeseries`'s device-ID filter reads
-  the key range server-side via the CDT builder (`.on_map_key_range(a, b).get_values()`) and filters
-  by device client-side in Python instead.
-- A bare `$.bin.count()` on a CDT bin raises `OpNotApplicable` — it needs the map-type-designator
-  token: `$.bin.{}.count()`.
-- `.get(return: ...)` only supports `COUNT`/`EXISTS`/`INDEX`/`RANK`/`ORDERED_MAP`/`UNORDERED_MAP` —
-  no `KEY`/`KEY_VALUE`. `gaming/leaderboard.py`'s "scores around a player" windowed read fetches the
-  whole scoreboard bucket and does the windowing client-side (with `bisect`) instead of the Java
-  SDK's single relative-range selector call.
+**Dataset-level `.where()` queries now require a secondary index** (or an explicit opt-in) on
+clusters with query selection, which 8.2.0 has: a `.where()` query the server can't satisfy with an
+index is rejected rather than silently falling back to a full-set scan. Use cases here that
+intentionally do a full scan (no index exists on the filtered bin) opt in explicitly with
+`.with_hint(QueryHint(allow_scans_with_where=True))` - see `advancedexpressions/advanced_expressions.py`.
+Single-key and batch (explicit key list) queries are unaffected.
 
-**CDT builder API is otherwise close to 1:1 with the Java SDK's** — `on_map_key`/`on_map_index`/
+**CDT builder API is close to 1:1 with the Java SDK's** — `on_map_key`/`on_map_index`/
 `on_map_key_range`/`on_map_value_range`/`on_map_key_relative_index_range`/`on_list_index`/etc. exist
 on **both** read and write builders in this SDK (no read/write asymmetry gap for
 `on_map_key_relative_index_range` the way the Java SDK's alpha build had).
+
+One remaining genuine (server-side, version-independent) constraint: selector operands (`{...}`/
+`[...]`) must be static literals, not computed expressions - explicitly documented as such in the
+canonical AEL grammar itself, not an SDK-specific gap. `timeseries/time_series_large_variance_demo.py`'s
+bucket-split point is a fixed item count rather than a computed percentage for this reason.
 
 ## Known limitations (alpha SDK)
 
 - **This cluster's `test` namespace needs `strong-consistency` for real multi-record
   transactions**, same as `../java`/`../java-sdk`. Detection is much simpler here than on the Java
-  SDK side: `SyncSession.is_namespace_sc(namespace)` reports this directly (no throwaway-write
+  SDK side: `Session.is_namespace_sc(namespace)` reports this directly (no throwaway-write
   probe needed). `usecasecookbook/txn.py`'s `run_in_transaction(session, fn)` calls
   `session.do_in_transaction(fn)` when SC is on, or just `fn(session)` directly (no real transaction
-  object at all) when it's off — since `SyncTransactionalSession` is a superset of `SyncSession` for
+  object at all) when it's off — since `TransactionalSession` is a superset of `Session` for
   every method a use case actually calls, no subclassing/proxying is needed the way the Java SDK's
   `NonTransactionalCapableSession` shim requires.
 - `aerospike_async.Key` objects are **not hashable** in this SDK, unlike the Java client's `Key` —
@@ -113,6 +129,11 @@ on **both** read and write builders in this SDK (no read/write asymmetry gap for
   dict. `hotkeys/reducer.py` doesn't need per-operation unpacking either way (callers only care about
   success/failure), so this wasn't a blocker, just a simplification opportunity the Java SDK had that
   this port didn't need.
+- `session.info().namespace_details(namespace)` returns a structured `NamespaceDetail` with a fixed
+  field set (`keys`/`exists`/`strong_consistency`/`nsup_period`) that doesn't include arbitrary
+  config like `transaction-pending-limit`. `hotkeys/pending_limit_scope.py` uses the generic
+  `session.info().info(command)` (raw `get-config`/`set-config` text, same shape as the other two
+  modules' Info-protocol usage) for that instead.
 
 None of the above are code bugs to "fix" in this port — they're the actual current behavior of the
-alpha SDK build this was written against (`aerospike-sdk==0.9.0a5`).
+SDK build this was written against (`aerospike-sdk==0.9.0a6.dev95`).

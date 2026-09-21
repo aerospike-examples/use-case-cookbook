@@ -2,13 +2,13 @@
 
 There is no annotation-driven object mapper in this SDK (unlike
 aerospike-sdk-mapper-java on the Java SDK side), so ``setup``/``run`` are handed a plain
-``SyncSession`` only - each use case builds its own ``DataSet``s directly (see each use
+``Session`` only - each use case builds its own ``DataSet``s directly (see each use
 case's module for its namespace/set names, taken from :mod:`usecasecookbook.config`).
 """
 
 from abc import ABC, abstractmethod
 
-from aerospike_sdk import SyncSession
+from aerospike_sdk.sync import Session
 
 from usecasecookbook.parameter import Parameter
 
@@ -33,7 +33,7 @@ class UseCase(ABC):
         return []
 
     @abstractmethod
-    def setup(self, session: SyncSession) -> None:
+    def setup(self, session: Session) -> None:
         """Truncate the set(s) and (re)generate this use case's data.
 
         Run whenever the use case is selected; does not necessarily reflect the
@@ -41,7 +41,7 @@ class UseCase(ABC):
         """
 
     @abstractmethod
-    def run(self, session: SyncSession) -> None:
+    def run(self, session: Session) -> None:
         """Execute the use case and print results to the console.
 
         Results should be self-explanatory, or documented at ``get_reference()``.

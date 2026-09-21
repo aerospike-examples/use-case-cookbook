@@ -5,7 +5,7 @@ reflection trick is needed to mutate it (see parameter.py).
 
 import traceback
 
-from aerospike_sdk import SyncSession
+from aerospike_sdk.sync import Session
 
 from usecasecookbook import ansi_colors as c
 from usecasecookbook.parameter import Parameter
@@ -20,7 +20,7 @@ _PARSERS = {
 
 
 class UseCaseExecutor:
-    def __init__(self, session: SyncSession):
+    def __init__(self, session: Session):
         self.session = session
 
     def execute_use_case(

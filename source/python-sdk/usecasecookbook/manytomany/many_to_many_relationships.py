@@ -13,7 +13,8 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 from aerospike_async import ListReturnType
-from aerospike_sdk import DataSet, SyncSession
+from aerospike_sdk import DataSet
+from aerospike_sdk.sync import Session
 
 from usecasecookbook import config
 from usecasecookbook.manytomany.model import Account, Customer
@@ -49,7 +50,7 @@ def _random_account(account_id: str) -> Account:
     return Account(account_id, f"Account {account_id}", balance_in_cents, date_opened)
 
 
-def add_account(session: SyncSession, account: Account, owner_ids: list[str]) -> bool:
+def add_account(session: Session, account: Account, owner_ids: list[str]) -> bool:
     """Adds a new account and updates every owning customer's ``accounts`` list, all
     inside a transaction. Returns ``True`` if every operation succeeded.
 
@@ -60,7 +61,7 @@ def add_account(session: SyncSession, account: Account, owner_ids: list[str]) ->
     customer) against the same transactional session.
     """
 
-    def _op(tx: SyncSession) -> bool:
+    def _op(tx: Session) -> bool:
         tx.upsert(ACCOUNTS.id(account.id)).put(account.to_bins()).execute()
         tx.upsert(ACCOUNTS.id(account.id)).bin("owners").set_to(owner_ids).execute()
 
@@ -81,7 +82,7 @@ def add_account(session: SyncSession, account: Account, owner_ids: list[str]) ->
     return run_in_transaction(session, _op)
 
 
-def get_related_customers(session: SyncSession, customer_id: str) -> dict[str, int]:
+def get_related_customers(session: Session, customer_id: str) -> dict[str, int]:
     """Determines every customer related to ``customer_id`` - i.e. sharing ownership of
     at least one account - and how many accounts they share. Returns a map of related
     customer id to shared-account count."""
@@ -106,7 +107,7 @@ def get_related_customers(session: SyncSession, customer_id: str) -> dict[str, i
     return counts
 
 
-def get_related_account_ids(session: SyncSession, customer_id: str) -> list[str] | None:
+def get_related_account_ids(session: Session, customer_id: str) -> list[str] | None:
     """Gets the list of account ids related to a customer, or ``None`` if the customer
     does not exist."""
     stream = session.query(CUSTOMERS.id(customer_id)).execute()
@@ -117,12 +118,12 @@ def get_related_account_ids(session: SyncSession, customer_id: str) -> list[str]
     return row.record.bins.get("accounts")
 
 
-def remove_association(session: SyncSession, customer_id: str, account_id: str) -> None:
+def remove_association(session: Session, customer_id: str, account_id: str) -> None:
     """Removes the association between a customer and an account, inside a transaction:
     removes the account id from the customer's ``accounts`` list, then the customer id
     from the account's ``owners`` list."""
 
-    def _op(tx: SyncSession) -> None:
+    def _op(tx: Session) -> None:
         customer_stream = (
             tx.upsert(CUSTOMERS.id(customer_id))
             .bin("accounts").on_list_value(account_id).remove(return_type=ListReturnType.COUNT)
@@ -177,7 +178,7 @@ class ManyToManyRelationships(UseCase):
     def get_reference(self) -> str:
         return "https://github.com/aerospike-examples/use-case-cookbook/blob/main/UseCases/many-to-many-relationships.md"
 
-    def setup(self, session: SyncSession) -> None:
+    def setup(self, session: Session) -> None:
         session.truncate(ACCOUNTS)
         session.truncate(CUSTOMERS)
 
@@ -193,7 +194,7 @@ class ManyToManyRelationships(UseCase):
             owner_ids = sorted({f"Cust-{random.randint(1, NUM_CUSTOMERS)}" for _ in range(num_owners)})
             add_account(session, account, owner_ids)
 
-    def run(self, session: SyncSession) -> None:
+    def run(self, session: Session) -> None:
         result = get_related_customers(session, "Cust-1")
         print(f"\nFinding all the customers related to customer 'Cust-1' ({len(result)}):")
         display_related_customers(result)

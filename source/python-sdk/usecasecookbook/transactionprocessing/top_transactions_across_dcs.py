@@ -18,7 +18,8 @@ import time
 from datetime import datetime, timedelta, timezone
 
 from aerospike_async import MapOrder
-from aerospike_sdk import DataSet, SyncSession
+from aerospike_sdk import DataSet
+from aerospike_sdk.sync import Session
 
 from usecasecookbook import config
 from usecasecookbook.async_util import Async
@@ -89,7 +90,7 @@ class TopTransactionsAcrossDcs(UseCase):
     def get_reference(self) -> str:
         return "https://github.com/aerospike-examples/use-case-cookbook/blob/main/UseCases/top-transactions-across-dcs.md"
 
-    def setup(self, session: SyncSession) -> None:
+    def setup(self, session: Session) -> None:
         session.truncate(ACCOUNTS)
         session.truncate(TRANSACTIONS)
 
@@ -98,7 +99,7 @@ class TopTransactionsAcrossDcs(UseCase):
             account = Account(f"acct-{i}")
             session.upsert(ACCOUNTS.id(account.id)).put(account.to_bins()).execute()
 
-    def run(self, session: SyncSession) -> None:
+    def run(self, session: Session) -> None:
         def main_thread(async_runner: Async) -> None:
             total_txns = _Counter()
             txn_counter = _Counter()
@@ -148,7 +149,7 @@ class TopTransactionsAcrossDcs(UseCase):
         Async.run_for(RUNTIME_SECS, main_thread)
 
     def _show_top_transactions_for_account1(
-        self, session: SyncSession, async_runner: Async, total_txns: _Counter,
+        self, session: Session, async_runner: Async, total_txns: _Counter,
     ) -> None:
         print(f"{async_runner.virtual_date()}: {total_txns.get():,} transactions generated")
         start = time.monotonic()
@@ -161,41 +162,33 @@ class TopTransactionsAcrossDcs(UseCase):
             )
         print(f"{len(top_results)} transaction(s) retrieved in {elapsed_ms:,.0f}ms\n")
 
-    def get_top_results(self, session: SyncSession, count: int, account_id: str) -> list[Transaction]:
+    def get_top_results(self, session: Session, count: int, account_id: str) -> list[Transaction]:
         """Return an account's most recent transactions across both DC maps, newest first.
 
-        ../../java-sdk merges the two per-DC maps and takes the top N as a single AEL read
-        (``let (merged = $.dc1.putItems($.dc2)) then ((${merged}).{-N:})``, wrapped in a
-        ``when`` for a DC bin that doesn't exist yet). This SDK's AEL grammar has no
-        equivalent map-merge path function - confirmed via the ANTLR grammar (there is no
-        ``putItems`` token anywhere in ``Condition.g4``) and empirically: running that exact
-        expression through ``select_from`` raises ``AelParseException: line 1:28 no viable
-        alternative at input 'let(merged=$.dc1.putItems('``. So the merge is done
-        client-side here instead: read the account record (both DC maps come back as plain
-        dicts keyed by the same zero-padded "timestamp-id" string used to write them, so
-        string order == chronological order), merge the two dicts, sort the combined keys
-        descending, and take the top few. Over-fetches by a few entries (same as
-        ../../java-sdk) since a transaction's map entry can arrive slightly before the
-        transaction record itself is written.
+        Merges the two per-DC maps and takes the top N as a single AEL read - matching
+        ../../java-sdk's ``let (merged = $.dc1.putItems($.dc2)) then ((${merged}).{-N:})``,
+        wrapped in a ``when`` for a DC bin that doesn't exist yet (an account may not have
+        transactions in both DCs). ``putItems()`` is a write-shaped path terminal, so this
+        needs server-side AEL compilation (Aerospike 8.2.0+); see ``../README.md``. ``{-N:}``
+        returns the top N map entries in ascending key order, so the result is reversed to get
+        newest-first. Over-fetches by a few entries (same as ../../java-sdk) since a
+        transaction's map entry can arrive slightly before the transaction record itself is
+        written.
         """
-        stream = session.query(ACCOUNTS.id(account_id)).execute()
-        record = None
-        for row in stream:
-            if row.is_ok:
-                record = row.record
-        stream.close()
-        if record is None:
-            return []
-
-        merged: dict[str, str] = {}
-        merged.update(record.bins.get(BIN_DC1) or {})
-        merged.update(record.bins.get(BIN_DC2) or {})
-        if not merged:
-            return []
-
         count_to_use = count + 3
-        top_keys = sorted(merged.keys(), reverse=True)[:count_to_use]
-        txn_ids = [merged[k] for k in top_keys]
+        ael = f"""
+            when (
+                $.{BIN_DC1}.exists() and $.{BIN_DC2}.exists() =>
+                    let (merged = $.{BIN_DC1}.putItems($.{BIN_DC2})) then ((${{merged}}).{{-{count_to_use}:}}),
+                $.{BIN_DC1}.exists() => $.{BIN_DC1}.{{-{count_to_use}:}},
+                $.{BIN_DC2}.exists() => $.{BIN_DC2}.{{-{count_to_use}:}},
+                default => []
+            )
+        """
+        row = session.query(ACCOUNTS.id(account_id)).bin("top").select_from(ael).execute().first()
+        if row is None or row.record is None:
+            return []
+        txn_ids = list(reversed(row.record.bins.get("top") or []))
 
         keys = [TRANSACTIONS.id(tid) for tid in txn_ids]
         txn_stream = session.query(keys).execute()

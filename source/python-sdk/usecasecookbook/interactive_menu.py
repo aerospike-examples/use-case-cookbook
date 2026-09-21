@@ -6,7 +6,7 @@ command reference, which applies unchanged here.
 import re
 import shutil
 
-from aerospike_sdk import SyncSession
+from aerospike_sdk.sync import Session
 
 from usecasecookbook import ansi_colors as c
 from usecasecookbook import use_case_registry as registry
@@ -15,7 +15,7 @@ from usecasecookbook.use_case_executor import UseCaseExecutor
 
 
 class InteractiveMenu:
-    def __init__(self, session: SyncSession):
+    def __init__(self, session: Session):
         self.executor = UseCaseExecutor(session)
         self.filtered_use_cases: list[UseCase] = list(registry.get_all_use_cases())
         self.current_search_term: str | None = None

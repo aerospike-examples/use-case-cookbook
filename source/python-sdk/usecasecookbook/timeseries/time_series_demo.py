@@ -4,21 +4,12 @@ per bucket); each record holds a key-ordered map from a time-sortable ``eventId`
 ``[deviceId, eventDetails]`` pair, so range/pagination queries against a bucket become map
 key-range operations.
 
-Device filtering: the java-sdk port pushes device filtering down server-side with a single AEL
-expression combining a map key-range selector with a ``[?(...)]`` filter clause on the loop
-variable (a Java-SDK-only construct). This SDK's AEL grammar
-(``aerospike_sdk/ael/antlr4/Condition.g4``) has no filter-clause construct at all - confirmed
-empirically against a live cluster, attempting the closest equivalent:
-
-    session.query(key).bin("map").select_from(
-        "$.map.{lo-hi}&[?(@.[0] in ['dev1','dev2'])]"
-    ).execute()
-    -> AelParseException: line 1:17 token recognition error at: '?('
-
-So this port fetches the eventId range server-side via the native ``on_map_key_range(...)
-.get_values()`` CDT operation (no AEL needed for the no-device-filter case - and actually a
-cleaner, more direct read than an AEL round-trip), then applies the device-id filter client-side
-in Python.
+Device filtering: pushed down server-side with a single AEL expression combining a map
+key-range selector with a ``&[?(...)]`` filter clause on the loop variable, matching
+../../java-sdk. Requires server-side AEL compilation (Aerospike 8.2.0+); see ``../README.md``.
+When no device filter is requested, this instead uses the native ``on_map_key_range(...)
+.get_values()`` CDT operation directly - simpler than round-tripping through an AEL string for
+a plain key-range read with no filter to push down.
 """
 
 import random
@@ -27,8 +18,9 @@ from collections.abc import Sequence
 from datetime import datetime, timezone
 
 from aerospike_async import MapOrder, ResultCode
-from aerospike_sdk import DataSet, SyncSession
+from aerospike_sdk import DataSet
 from aerospike_sdk.exceptions import AerospikeError
+from aerospike_sdk.sync import Session
 
 from usecasecookbook import config
 from usecasecookbook.ansi_colors import RESET, YELLOW
@@ -91,7 +83,7 @@ def _next_event_id(event_id: str) -> str:
 # Writes
 # ----------------------------------------------------------------------
 
-def upsert_event(session: SyncSession, event: Event, set_expiry: bool) -> None:
+def upsert_event(session: Session, event: Event, set_expiry: bool) -> None:
     """Insert or update an event. If ``set_expiry`` is true, the bucket record's TTL is set to
     the retention window; otherwise its TTL is left unchanged.
     """
@@ -101,7 +93,7 @@ def upsert_event(session: SyncSession, event: Event, set_expiry: bool) -> None:
     _write_event(session, key, event, set_expiry)
 
 
-def _write_event(session: SyncSession, key, event: Event, set_expiry: bool) -> None:
+def _write_event(session: Session, key, event: Event, set_expiry: bool) -> None:
     global _expiration_warning_shown
 
     op = session.upsert(key)
@@ -149,7 +141,7 @@ def _latest_timestamp(end_timestamp: int | None) -> int:
 
 
 def get_events_between(
-    session: SyncSession,
+    session: Session,
     account_id: str,
     start_timestamp: int | None = None,
     end_timestamp: int | None = None,
@@ -212,7 +204,7 @@ def get_events_between(
 
 
 def get_events_before(
-    session: SyncSession, account_id: str, event_id: str | None = None,
+    session: Session, account_id: str, event_id: str | None = None,
     count: int = 50, device_ids: Sequence[str] = (),
 ) -> list[Event]:
     """Retrieve events for an account before a specified event ID (newest first)."""
@@ -220,14 +212,14 @@ def get_events_before(
 
 
 def get_events_after(
-    session: SyncSession, account_id: str, event_id: str,
+    session: Session, account_id: str, event_id: str,
     count: int = 50, device_ids: Sequence[str] = (),
 ) -> list[Event]:
     """Retrieve events for an account after a specified event ID (oldest first)."""
     return get_events_between(session, account_id, None, None, event_id, count, ASCENDING, device_ids)
 
 
-def get_total_events_for_account(session: SyncSession, account_id: str) -> int:
+def get_total_events_for_account(session: Session, account_id: str) -> int:
     """The total number of events currently stored for an account (sums ``map_size()`` across
     every bucket in the retention window, via one multi-key batch read)."""
     _validate_account_id(account_id)
@@ -249,28 +241,31 @@ def get_total_events_for_account(session: SyncSession, account_id: str) -> int:
 
 
 def _read_filtered_bucket(
-    session: SyncSession, key, earliest_event_id: str, latest_event_id: str,
+    session: Session, key, earliest_event_id: str, latest_event_id: str,
     device_filter: set[str] | None,
 ) -> list:
-    """Read a bucket's events restricted to an eventId key range via the native
-    ``on_map_key_range(...).get_values()`` CDT operation (server-side, key-ordered). Device
-    filtering (when requested) happens client-side afterwards - see the module docstring for why
-    it isn't pushed down server-side here.
+    """Read a bucket's events restricted to an eventId key range, server-side. With a device
+    filter, both the key-range selection and the device-id filter run in one AEL expression
+    (a key-range selector chained with a ``&[?(...)]`` filter on the loop variable's first
+    element); without one, the simpler native ``on_map_key_range(...).get_values()`` CDT
+    operation is used directly.
     """
-    stream = (
-        session.query(key).bin(BIN_NAME)
-        .on_map_key_range(earliest_event_id, latest_event_id)
-        .get_values()
-        .execute()
-    )
+    if device_filter:
+        device_list = ", ".join(f"'{device_id}'" for device_id in device_filter)
+        ael = f'$.{BIN_NAME}.{{@"{earliest_event_id}":"{latest_event_id}"}}&[?(@.[0] in [{device_list}])]'
+        stream = session.query(key).bin(BIN_NAME).select_from(ael).execute()
+    else:
+        stream = (
+            session.query(key).bin(BIN_NAME)
+            .on_map_key_range(earliest_event_id, latest_event_id)
+            .get_values()
+            .execute()
+        )
     row = stream.first()
     stream.close()
     if row is None or row.record is None:
         return []
-    entries = row.record.bins.get(BIN_NAME) or []
-    if device_filter:
-        entries = [entry for entry in entries if entry[0] in device_filter]
-    return entries
+    return row.record.bins.get(BIN_NAME) or []
 
 
 def _add_events_to_results(count: int, entries: list, results: list[Event], direction: str) -> None:
@@ -349,7 +344,7 @@ def display_events(events: list[Event]) -> None:
         print(f"{i:2d}: {event.id} - {event.timestamp} - {event.device_id}")
 
 
-def _generate_sample_data(session: SyncSession) -> None:
+def _generate_sample_data(session: Session) -> None:
     devices_created = 0
     events_created = 0
 
@@ -368,7 +363,7 @@ def _generate_sample_data(session: SyncSession) -> None:
         print(f"{account_num:,} accounts, {devices_created:,} devices, {events_created:,} events")
 
 
-def _demonstrate_queries(session: SyncSession) -> None:
+def _demonstrate_queries(session: Session) -> None:
     print(f"Account acct-1 has {get_total_events_for_account(session, 'acct-1'):,} events\n")
 
     print("First list -- acct-1, all devices")
@@ -441,9 +436,9 @@ class TimeSeriesDemo(UseCase):
     def get_reference(self) -> str:
         return "https://github.com/aerospike-examples/use-case-cookbook/blob/main/UseCases/timeseries.md"
 
-    def setup(self, session: SyncSession) -> None:
+    def setup(self, session: Session) -> None:
         session.truncate(EVENTS)
         _generate_sample_data(session)
 
-    def run(self, session: SyncSession) -> None:
+    def run(self, session: Session) -> None:
         _demonstrate_queries(session)

@@ -21,7 +21,8 @@ import threading
 from bisect import bisect_left
 
 from aerospike_async import Key, MapOrder
-from aerospike_sdk import DataSet, SyncSession
+from aerospike_sdk import DataSet
+from aerospike_sdk.sync import Session
 
 from usecasecookbook import config
 from usecasecookbook.async_util import Async
@@ -89,7 +90,7 @@ class Leaderboard(UseCase):
             shield_expiry=0, online=False, being_attacked_by="", score=score,
         )
 
-    def setup(self, session: SyncSession) -> None:
+    def setup(self, session: Session) -> None:
         session.truncate(PLAYERS)
         session.truncate(SCOREBOARD)
 
@@ -99,7 +100,7 @@ class Leaderboard(UseCase):
             session.upsert(PLAYERS.id(player.id)).put(player.to_bins()).execute()
             self.update_player_score(session, player.id, -1, player.score)
 
-    def run(self, session: SyncSession) -> None:
+    def run(self, session: Session) -> None:
         row = session.query(PLAYERS.id(1)).execute().first()
         score = row.record.bins["score"]
         player_id = row.record.bins["id"]
@@ -166,10 +167,10 @@ class Leaderboard(UseCase):
         score_str, id_str = map_key.split("-")
         return ScoreEntry(id=int(id_str), score=int(score_str))
 
-    def update_player_score(self, session: SyncSession, player_id: int, old_score: int, new_score: int) -> None:
+    def update_player_score(self, session: Session, player_id: int, old_score: int, new_score: int) -> None:
         """Sets the score of the player, both on the player record and the scoreboard's map."""
 
-        def op(tx: SyncSession) -> None:
+        def op(tx: Session) -> None:
             new_bucket_key = self._scoreboard_key(new_score)
             if old_score < 0:
                 map_key = self._map_key(player_id, new_score)
@@ -203,7 +204,7 @@ class Leaderboard(UseCase):
 
         run_in_transaction(session, op)
 
-    def _add_overflow_lower(self, session: SyncSession, lower: list[str], bucket: int, n: int) -> None:
+    def _add_overflow_lower(self, session: Session, lower: list[str], bucket: int, n: int) -> None:
         current = bucket - 1
         while current >= 0 and len(lower) < n:
             index = len(lower) - n
@@ -217,7 +218,7 @@ class Leaderboard(UseCase):
                 lower[0:0] = extra
             current -= 1
 
-    def _add_overflow_higher(self, session: SyncSession, higher: list[str], bucket: int, n: int) -> None:
+    def _add_overflow_higher(self, session: Session, higher: list[str], bucket: int, n: int) -> None:
         current = bucket + 1
         while current <= MAX_BUCKETS and len(higher) < n + 1:
             count = n + 1 - len(higher)
@@ -232,7 +233,7 @@ class Leaderboard(UseCase):
             current += 1
 
     def get_scores_around_player(
-        self, session: SyncSession, player_id: int, score: int, num_players_either_side: int,
+        self, session: Session, player_id: int, score: int, num_players_either_side: int,
     ) -> list[ScoreEntry]:
         """Gets the scores on either side of a player's score. Reads a clamped index range
         either side of the player's map key directly via ``on_map_key_relative_index_range``,
@@ -270,7 +271,7 @@ class Leaderboard(UseCase):
 
         return [self._map_key_to_score_entry(k) for k in lower] + [self._map_key_to_score_entry(k) for k in higher]
 
-    def populate_full_player_details(self, session: SyncSession, partial_players: list[ScoreEntry]) -> list[Player]:
+    def populate_full_player_details(self, session: Session, partial_players: list[ScoreEntry]) -> list[Player]:
         if not partial_players:
             return []
         keys = [PLAYERS.id(p.id) for p in partial_players]
@@ -282,7 +283,7 @@ class Leaderboard(UseCase):
         stream.close()
         return players
 
-    def show_players_around_player(self, session: SyncSession, player_id: int, score: int) -> None:
+    def show_players_around_player(self, session: Session, player_id: int, score: int) -> None:
         player_list = self.populate_full_player_details(
             session, self.get_scores_around_player(session, player_id, score, 6),
         )

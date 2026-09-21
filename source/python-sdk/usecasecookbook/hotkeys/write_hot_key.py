@@ -9,7 +9,7 @@ Both phases also read the logical total about once every 5ms so occasional reads
 alongside the write-heavy load.
 """
 
-from aerospike_sdk import SyncSession
+from aerospike_sdk.sync import Session
 
 from usecasecookbook import config
 from usecasecookbook.hotkeys import keys as hot_key_keys
@@ -30,10 +30,10 @@ class WriteHotKeyUseCase(UseCase):
     def get_reference(self) -> str:
         return "https://github.com/aerospike-examples/use-case-cookbook/blob/main/UseCases/hot-key-write-shard-merge.md"
 
-    def setup(self, session: SyncSession) -> None:
+    def setup(self, session: Session) -> None:
         product_setup.truncate_and_seed(session, simulation.REPLICA_COUNT)
 
-    def run(self, session: SyncSession) -> None:
+    def run(self, session: Session) -> None:
         product_id = simulation.HOT_PRODUCT_ID
         num_threads = simulation.NUM_THREADS
         duration_secs = simulation.DURATION_SECS

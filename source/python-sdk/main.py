@@ -3,7 +3,7 @@
 
 Mirrors ../java-sdk/src/main/java/com/aerospike/examples/UseCaseCookbookRunner.java:
 supports both a named-use-case batch path (``-uc``) and the interactive menu (no ``-uc``).
-Cluster capability detection uses ``SyncSession.is_namespace_sc`` directly (see
+Cluster capability detection uses ``Session.is_namespace_sc`` directly (see
 usecasecookbook/txn.py) rather than a throwaway-transaction probe, since this SDK exposes
 strong-consistency status as a plain query.
 """
@@ -126,9 +126,9 @@ def main() -> int:
         parser.print_help()
         return 1
 
-    client = connector.connect(args)
+    cluster = connector.connect(args)
     try:
-        session = client.create_session()
+        session = cluster.create_session()
 
         if not transactions_supported(session):
             print(
@@ -148,7 +148,7 @@ def main() -> int:
         InteractiveMenu(session).run_menu()
         return 0
     finally:
-        client.close()
+        cluster.close()
 
 
 if __name__ == "__main__":

@@ -5,7 +5,7 @@ previous value on exit.
 
 from contextlib import contextmanager
 
-from aerospike_sdk import SyncSession
+from aerospike_sdk.sync import Session
 
 
 def _parse_info_value(raw: str, key: str) -> str:
@@ -17,14 +17,16 @@ def _parse_info_value(raw: str, key: str) -> str:
     raise KeyError(f"'{key}' not found in info response: {raw!r}")
 
 
-def read_transaction_pending_limit(session: SyncSession, namespace: str) -> int:
-    details = session.info().namespace_details(namespace)
-    if details is None:
-        raise RuntimeError(f"Namespace not found: {namespace}")
-    return int(_parse_info_value(details[f"namespace/{namespace}"], "transaction-pending-limit"))
+def read_transaction_pending_limit(session: Session, namespace: str) -> int:
+    # session.info().namespace_details(namespace) returns a structured NamespaceDetail with a
+    # fixed set of fields (keys/exists/strong_consistency/nsup_period) that doesn't include
+    # transaction-pending-limit, so this reads the raw get-config response directly instead.
+    command = f"get-config:context=namespace;id={namespace}"
+    response = session.info().info(command)
+    return int(_parse_info_value(response[command], "transaction-pending-limit"))
 
 
-def _set_transaction_pending_limit(session: SyncSession, namespace: str, pending_limit: int) -> None:
+def _set_transaction_pending_limit(session: Session, namespace: str, pending_limit: int) -> None:
     command = f"set-config:context=namespace;id={namespace};transaction-pending-limit={pending_limit}"
     responses = session.info().info_on_all_nodes(command)
     for node_name, node_response in responses.items():
@@ -34,7 +36,7 @@ def _set_transaction_pending_limit(session: SyncSession, namespace: str, pending
 
 
 @contextmanager
-def apply(session: SyncSession, namespace: str, pending_limit: int):
+def apply(session: Session, namespace: str, pending_limit: int):
     """Reads the current namespace limit, applies ``pending_limit`` on every cluster node, and
     restores the original value when the context manager exits.
     """

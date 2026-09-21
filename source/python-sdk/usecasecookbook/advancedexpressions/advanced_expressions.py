@@ -5,14 +5,17 @@ use case per se but a set of techniques for advanced expression usage:
 2. Checking whether a bin's value is in a passed-in list (``color IN ["Red","Green","Blue"]``)
 3. Performing multiple operations, some depending on others' results, within one write
 
-Techniques 1 and 2 port to AEL exactly as ../../java-sdk has them. Technique 3 does not -
-see :meth:`AdvancedExpressions.multiple_commands_in_one_operation` for why.
+All three port to AEL exactly as ../../java-sdk has them - including technique 3's single
+nested ``let``/``when`` write with ``append(value)`` branches, which requires server-side AEL
+compilation (Aerospike 8.2.0+) to parse; see ``../README.md``'s "Expressions: AEL" section for
+what that depends on and why it wasn't available earlier in this port.
 """
 
 import random
 
 from aerospike_async import ListOrderType
-from aerospike_sdk import DataSet, SyncSession
+from aerospike_sdk import DataSet, QueryHint
+from aerospike_sdk.sync import Session
 
 from usecasecookbook import config
 from usecasecookbook.advancedexpressions.model import Car
@@ -70,7 +73,7 @@ class AdvancedExpressions(UseCase):
     def get_reference(self) -> str:
         return "https://github.com/aerospike-examples/use-case-cookbook/blob/main/UseCases/advanced-expressions.md"
 
-    def setup(self, session: SyncSession) -> None:
+    def setup(self, session: Session) -> None:
         session.truncate(CARS)
 
         print(f"Generating {NUM_CARS:,} Cars")
@@ -78,7 +81,7 @@ class AdvancedExpressions(UseCase):
             car = _random_car(car_id)
             session.upsert(CARS.id(car.id)).put(car.to_bins()).execute()
 
-    def run(self, session: SyncSession) -> None:
+    def run(self, session: Session) -> None:
         print(
             "Find 10 cars which have Sunroofs. The features of the car are stored in the 'features' bin, so this is "
             "effectively doing:\n"
@@ -97,71 +100,52 @@ class AdvancedExpressions(UseCase):
 
         self._multiple_commands_in_one_operation(session)
 
-        # A scalar path read needs an explicit get(type: ...) suffix - the server can't infer
-        # the type of a single-element read from the path alone. append(10) can't be expressed
-        # in this SDK's AEL (its grammar only accepts a bare, argument-less "append()" path
-        # function - "$.acc.append(10)" raises AelParseException: line 1:12 mismatched input
-        # '(' expecting '()'), so the append itself uses the native CDT builder; only the
-        # typed read-back into "counter" uses AEL, same as ../../java-sdk's "$.acc.[0]:INT".
+        # AEL's append(value) can't create a missing list bin (confirmed empirically:
+        # OpNotApplicable both bare and with a :UNSORTED create-order suffix), so the bin is
+        # created via the native CDT builder first; the append and the typed read-back into
+        # "counter" both use AEL, matching ../../java-sdk's "$.acc.[0]:INT".
         key = CARS.id(1)
-        session.upsert(key) \
-            .bin("acc").list_create(ListOrderType.UNORDERED) \
-            .bin("acc").list_append(10) \
-            .execute()
-        session.upsert(key).bin("counter").upsert_from("$.acc.[0].get(type: INT)").execute()
+        session.upsert(key).bin("acc").list_create(ListOrderType.UNORDERED).execute()
+        session.upsert(key).bin("acc").upsert_from("$.acc.append(10)").execute()
+        session.upsert(key).bin("counter").upsert_from("$.acc.[0]:INT").execute()
         session.upsert(key).bin("acc").remove().execute()
 
-    def _find_cars_with_feature(self, session: SyncSession, feature: str) -> None:
+    def _find_cars_with_feature(self, session: Session, feature: str) -> None:
         """Membership check via AEL's ``value in $.bin`` operator."""
         self._show_cars_matching_expression(session, f"'{feature}' in $.features", 10)
 
-    def _find_cars_with_colors(self, session: SyncSession, colors: list[str]) -> None:
+    def _find_cars_with_colors(self, session: Session, colors: list[str]) -> None:
         """Same operator, reversed direction: ``$.color in [...]``."""
         color_list = ", ".join(f'"{c}"' for c in colors)
         self._show_cars_matching_expression(session, f"$.color in [{color_list}]", 10)
 
-    def _multiple_commands_in_one_operation(self, session: SyncSession) -> None:
-        """../../java-sdk adds all 4 conditional features in ONE write via a 4-level nested
-        AEL ``let``/``when`` expression, each branch appending a string with
-        ``$.features.append('...')``. That's not portable here: this SDK's AEL grammar
-        only recognizes a bare, argument-less ``append()`` path function (confirmed via the
-        ANTLR grammar and empirically - passing an argument raises the same
-        ``AelParseException`` as the ``acc``/``counter`` demo above), so AEL cannot itself
-        mutate a list bin in this SDK version; it's read-only for CDT writes.
-
-        The nested ``let``/``when`` composition to *evaluate* the 4 conditions works fine
-        (verified against a live cluster: color/bodyType/engineSize/year all correctly
-        combined through nested let-bound variables) - only the "and append the result to a
-        list bin" write half is the gap. So this reads the car's 4 scalar bins, evaluates
-        the same 4 conditions in Python, and appends the qualifying feature names with one
-        native ``list_append_items`` write - one read + one write instead of ../../java-sdk's
-        single write, but the same conditional-features result.
+    def _multiple_commands_in_one_operation(self, session: Session) -> None:
+        """Adds all 4 conditional features in ONE write via a 4-level nested AEL ``let``/
+        ``when`` expression, each branch appending a string with ``$.features.append('...')`` -
+        exactly matching ../../java-sdk's ``multipleCommandsInOneOperation``. Requires
+        server-side AEL compilation (Aerospike 8.2.0+); see ``../README.md``.
         """
         key = CARS.id(1)
         session.upsert(key).bin("color").set_to("Purple").execute()
 
-        car = self._read_car(session, key)
         print("Record before augmenting:")
-        self._print_car(1, car.to_bins())
+        self._print_car(1, self._read_car(session, key).to_bins())
 
-        features_to_add = []
-        if car.color == "Purple":
-            features_to_add.append("Great Color")
-        if car.body_type == "CONVERTIBLE":
-            features_to_add.append("Looks Cool")
-        if car.engine_size > 5.0:
-            features_to_add.append("Powerful")
-        if car.year >= 2020:
-            features_to_add.append("New-ish")
-
-        if features_to_add:
-            session.upsert(key).bin("features").list_append_items(features_to_add).execute()
+        ael = """
+            let (
+              color = when ($.color == 'Purple' => $.features.append('Great Color'), default => $.features),
+              type  = when ($.bodyType == 'CONVERTIBLE' => (${color}).append('Looks Cool'), default => ${color}),
+              power = when ($.engineSize > 5.0 => (${type}).append('Powerful'), default => ${type}),
+              age   = when ($.year >= 2020 => (${power}).append('New-ish'), default => ${power})
+            ) then (${age})
+        """
+        session.upsert(key).bin("features").upsert_from(ael).execute()
 
         print("Record after augmenting:")
         self._print_car(1, self._read_car(session, key).to_bins())
 
     @staticmethod
-    def _read_car(session: SyncSession, key) -> Car:
+    def _read_car(session: Session, key) -> Car:
         stream = session.query(key).execute()
         car = None
         for row in stream:
@@ -171,8 +155,17 @@ class AdvancedExpressions(UseCase):
         assert car is not None, f"no car found for {key}"
         return car
 
-    def _show_cars_matching_expression(self, session: SyncSession, ael: str, limit: int) -> None:
-        stream = session.query(CARS).where(ael).limit(limit).execute()
+    def _show_cars_matching_expression(self, session: Session, ael: str, limit: int) -> None:
+        # No secondary index on "features"/"color" - this is an intentional full-set scan (the
+        # use case's own description notes a secondary index could do this instead), so opt into
+        # the primary-index fallback explicitly rather than have the server reject it.
+        stream = (
+            session.query(CARS)
+            .where(ael)
+            .with_hint(QueryHint(allow_scans_with_where=True))
+            .limit(limit)
+            .execute()
+        )
         count = 0
         for row in stream:
             if row.is_ok and row.record is not None:

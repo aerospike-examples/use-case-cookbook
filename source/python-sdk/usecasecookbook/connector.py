@@ -1,13 +1,12 @@
 """Parses command-line options for connecting to the cluster and turns them into a
-connected ``SyncClient``. Mirrors ../../java-sdk's SdkConnector onto this SDK's
-``SyncClient``/``ClientPolicy`` API.
+connected ``Cluster``. Mirrors ../../java-sdk's SdkConnector onto this SDK's
+``ClusterDefinition`` builder API.
 """
 
 import argparse
 import getpass
 
-from aerospike_async import AuthMode, ClientPolicy
-from aerospike_sdk import SyncClient
+from aerospike_sdk.sync import Cluster, ClusterDefinition, Host
 
 
 def add_connection_arguments(parser: argparse.ArgumentParser) -> None:
@@ -36,15 +35,14 @@ def validate_connection_options(args: argparse.Namespace) -> str:
     return ""
 
 
-def connect(args: argparse.Namespace) -> SyncClient:
-    policy = ClientPolicy()
+def connect(args: argparse.Namespace) -> Cluster:
+    hosts = Host.parse_hosts(args.hosts, 3000)
+    definition = ClusterDefinition(hosts=hosts)
     if args.user:
-        policy.set_auth_mode(AuthMode.INTERNAL, user=args.user, password=args.password)
+        definition = definition.with_native_credentials(args.user, args.password)
     if args.clusterName:
-        policy.cluster_name = args.clusterName
+        definition = definition.validate_cluster_name_is(args.clusterName)
     if args.useServicesAlternate:
-        policy.use_services_alternate = True
+        definition = definition.using_services_alternate()
 
-    client = SyncClient(args.hosts, policy)
-    client.connect()
-    return client
+    return definition.connect()

@@ -12,7 +12,8 @@ import random
 from datetime import datetime, timedelta, timezone
 
 from aerospike_async import ListReturnType
-from aerospike_sdk import DataSet, SyncSession
+from aerospike_sdk import DataSet
+from aerospike_sdk.sync import Session
 
 from usecasecookbook import config
 from usecasecookbook.onetomany.model import Agent, Listing
@@ -62,8 +63,8 @@ def _random_listing(listing_id: str) -> Listing:
     )
 
 
-def _add_listing_to_agent(session: SyncSession, listing_id: str, agent_id: int) -> None:
-    def _op(tx: SyncSession) -> None:
+def _add_listing_to_agent(session: Session, listing_id: str, agent_id: int) -> None:
+    def _op(tx: Session) -> None:
         tx.upsert(AGENTS.id(agent_id)).bin("listings").list_append_items(
             [listing_id], unique=True, no_fail=True,
         ).execute()
@@ -72,12 +73,12 @@ def _add_listing_to_agent(session: SyncSession, listing_id: str, agent_id: int) 
     run_in_transaction(session, _op)
 
 
-def add_listing(session: SyncSession, agent_id: int, listing: Listing) -> None:
+def add_listing(session: Session, agent_id: int, listing: Listing) -> None:
     """Saves ``listing`` and appends its id to ``agent_id``'s ``listings`` list, in a
     transaction."""
     listing.agent_id = agent_id
 
-    def _op(tx: SyncSession) -> None:
+    def _op(tx: Session) -> None:
         tx.upsert(LISTINGS.id(listing.id)).put(listing.to_bins()).execute()
         tx.upsert(AGENTS.id(agent_id)).bin("listings").list_append_items(
             [listing.id], unique=True, no_fail=True,
@@ -86,12 +87,12 @@ def add_listing(session: SyncSession, agent_id: int, listing: Listing) -> None:
     run_in_transaction(session, _op)
 
 
-def delete_listing(session: SyncSession, listing_id: str) -> bool:
+def delete_listing(session: Session, listing_id: str) -> bool:
     """Deletes a listing and removes it from its agent's ``listings`` list, in a
     transaction. Returns ``False`` if the listing did not exist."""
     listing_key = LISTINGS.id(listing_id)
 
-    def _op(tx: SyncSession) -> bool:
+    def _op(tx: Session) -> bool:
         stream = tx.query(listing_key).bins(["agentId"]).execute()
         row = stream.first()
         stream.close()
@@ -113,12 +114,12 @@ def delete_listing(session: SyncSession, listing_id: str) -> bool:
     return run_in_transaction(session, _op)
 
 
-def get_listings(session: SyncSession, agent_id: int) -> list[Listing]:
+def get_listings(session: Session, agent_id: int) -> list[Listing]:
     """Reads the agent's ``listings`` id list, then batch-reads every listing it
     references. Returns an empty list if the agent doesn't exist or has none."""
     agent_key = AGENTS.id(agent_id)
 
-    def _op(tx: SyncSession) -> list[Listing]:
+    def _op(tx: Session) -> list[Listing]:
         stream = tx.query(agent_key).bins(["listings"]).execute()
         row = stream.first()
         stream.close()
@@ -154,7 +155,7 @@ class OneToManyRelationships(UseCase):
     def get_reference(self) -> str:
         return "https://github.com/aerospike-examples/use-case-cookbook/blob/main/UseCases/one-to-many-relationships.md"
 
-    def setup(self, session: SyncSession) -> None:
+    def setup(self, session: Session) -> None:
         session.truncate(AGENTS)
         session.truncate(LISTINGS)
 
@@ -173,7 +174,7 @@ class OneToManyRelationships(UseCase):
             agent_id = random.randint(1, NUM_AGENTS)
             _add_listing_to_agent(session, listing_id, agent_id)
 
-    def run(self, session: SyncSession) -> None:
+    def run(self, session: Session) -> None:
         agent_id = random.randint(1, NUM_AGENTS)
         print(f"Examining listings for agent {agent_id}:")
         listings = get_listings(session, agent_id)

@@ -15,31 +15,19 @@ already split, or this write would overflow it) does ``upsert_event`` fall back 
 
 ``_split_bucket`` detects overflow and removes the minority slice in one call against the bucket
 record, gated by ``where()`` so the whole operate() is a no-op if another writer already handled
-the split (or the bucket has since shrunk back under the threshold). The java-sdk port does this
-as a single ``when(...)`` AEL expression mixing a conditional read (``select_from``) and a
-conditional write (``upsert_from``) of the same condition in one round trip. Attempting the direct
-equivalent here - a ``when(count >= N => ....remove(), default => ....get(return: UNORDERED_MAP))``
-expression written via ``upsert_from`` - fails server-side:
-
-    session.upsert(key).bin("map").upsert_from(
-        "when ($.map.{}.count() >= 10 => $.map.{-2:}.remove(), "
-        "default => $.map.{0:}.get(return: UNORDERED_MAP))"
-    ).execute()
-    -> AerospikeError: Code: ParameterError, ...
-
-(mixing a mutating path function - ``remove()`` - with a value-producing one - ``get(...)`` - as
-alternate ``when()`` branches is rejected server-side; each branch of a ``when()`` must be a pure
-value expression). So this port instead uses the ``where()`` clause on the whole write segment as
-the overflow gate, and issues the minority read (cross-bin, so it still needs an AEL
-``select_from``) and the majority removal (same-bin, so a native CDT ``on_map_index_range(...)
-.remove()`` op) as two ops in that one gated call - still one atomic round trip, just built from
-two simpler pieces instead of one `when()` expression.
+the split (or the bucket has since shrunk back under the threshold): the minority read (cross-bin,
+via an AEL ``select_from``) and the majority removal (same-bin, via a native CDT
+``on_map_index_range(...).remove()`` op) run as two ops in that one gated call - one atomic round
+trip. A single self-gated ``when(count >= N => ...remove(), default => $.map)`` expression per op
+(matching each op's own condition, no external ``.where()``) also works here and is closer to how
+../../java-sdk phrases it, but duplicates the count check across both ops for no behavioral
+difference; this port keeps the single shared ``.where()`` gate.
 
 The split point (``MINOR_SPLIT_ITEMS``) is a fixed item count rather than a percentage of the
 bucket's current size: like the java-sdk port, a computed bound (e.g. ``count() * 80 / 100``)
-isn't expressible - the map/list range selectors in this SDK's AEL grammar
-(``aerospike_sdk/ael/antlr4/Condition.g4``, ``indexRangeIdentifier: start ':' end``, where
-``start``/``end`` are ``signedInt`` - i.e. integer literal tokens) require static literal bounds.
+isn't expressible - a genuine canonical-grammar constraint ("Selector operands are static literals
+only... not parenthesised expressions", explicitly marked "will change in a later release"), not
+an SDK-specific gap.
 """
 
 import random
@@ -48,8 +36,9 @@ from collections.abc import Sequence
 from datetime import datetime, timezone
 
 from aerospike_async import ListOrderType, MapOrder, MapReturnType, ResultCode
-from aerospike_sdk import DataSet, SyncSession
+from aerospike_sdk import DataSet
 from aerospike_sdk.exceptions import AerospikeError
+from aerospike_sdk.sync import Session
 
 from usecasecookbook import config
 from usecasecookbook.ansi_colors import RESET, YELLOW
@@ -119,7 +108,7 @@ def _next_event_id(event_id: str) -> str:
 # Writes: insert with adaptive bucket splitting
 # ----------------------------------------------------------------------
 
-def upsert_event(session: SyncSession, event: Event, set_expiry: bool) -> None:
+def upsert_event(session: Session, event: Event, set_expiry: bool) -> None:
     _validate_event(event)
     root_key = _root_key(event.account_id, int(event.timestamp.timestamp() * 1000))
 
@@ -130,7 +119,7 @@ def upsert_event(session: SyncSession, event: Event, set_expiry: bool) -> None:
     # write would overflow it - so a transaction (with its extra reads) is genuinely needed to
     # find or create the right target block. Every other write short-circuits before ever
     # opening one.
-    def _find_and_write(tx: SyncSession) -> None:
+    def _find_and_write(tx: Session) -> None:
         continuation = _read_continuation_list(tx, root_key)
         target_key = root_key
         for sub_key in reversed(continuation):
@@ -145,7 +134,7 @@ def upsert_event(session: SyncSession, event: Event, set_expiry: bool) -> None:
     run_in_transaction(session, _find_and_write)
 
 
-def _try_write_to_root_block(session: SyncSession, root_key, event: Event, set_expiry: bool) -> bool:
+def _try_write_to_root_block(session: Session, root_key, event: Event, set_expiry: bool) -> bool:
     """The happy path: a single non-transactional ``upsert().where(...)`` call that inserts the
     event into the root block, filtered to only apply when the root hasn't split yet and still
     has room. Returns ``False`` - without writing anything - when the filter blocks the write, so
@@ -154,7 +143,7 @@ def _try_write_to_root_block(session: SyncSession, root_key, event: Event, set_e
     global _expiration_warning_shown
 
     can_write_to_root_ael = (
-        f"$.{CONTINUATION_BIN}.exists() == false and $.{BIN_NAME}.{{}}.count() < {MAX_RECORDS_PER_BUCKET}"
+        f"$.{CONTINUATION_BIN}.exists() == false and $.{BIN_NAME}:MAP.count() < {MAX_RECORDS_PER_BUCKET}"
     )
     op = session.upsert(root_key).where(can_write_to_root_ael)
     op = (
@@ -184,14 +173,14 @@ def _try_write_to_root_block(session: SyncSession, root_key, event: Event, set_e
         raise
 
 
-def _read_continuation_list(session: SyncSession, root_key) -> list[str]:
+def _read_continuation_list(session: Session, root_key) -> list[str]:
     row = session.query(root_key).bins([CONTINUATION_BIN]).execute().first()
     if row is None or row.record is None:
         return []
     return list(row.record.bins.get(CONTINUATION_BIN) or [])
 
 
-def _write_event_and_get_bucket_size(session: SyncSession, key, event: Event, set_expiry: bool) -> int:
+def _write_event_and_get_bucket_size(session: Session, key, event: Event, set_expiry: bool) -> int:
     global _expiration_warning_shown
 
     op = session.upsert(key)
@@ -222,7 +211,7 @@ def _write_event_and_get_bucket_size(session: SyncSession, key, event: Event, se
         raise
 
 
-def _split_bucket(session: SyncSession, root_key, bucket_key) -> None:
+def _split_bucket(session: Session, root_key, bucket_key) -> None:
     """Split an overflowing bucket: read its oldest ``MINOR_SPLIT_ITEMS`` events and remove them
     from the bucket in one gated call (see the module docstring for why this isn't a single
     ``when(...)`` expression), then - if anything was removed - persist that minority slice to a
@@ -233,11 +222,11 @@ def _split_bucket(session: SyncSession, root_key, bucket_key) -> None:
     ``upsert_event`` calls this right after a separate write that may have raced with another
     writer (under the non-transactional fallback - see usecasecookbook/txn.py).
     """
-    minority_ael = f"$.{BIN_NAME}.{{-{MINOR_SPLIT_ITEMS}:}}.get(return: UNORDERED_MAP)"
+    minority_ael = f"$.{BIN_NAME}.{{-{MINOR_SPLIT_ITEMS}:}}.getMaps():UNORDERED"
 
     row = (
         session.upsert(bucket_key)
-        .where(f"$.{BIN_NAME}.{{}}.count() >= {MAX_RECORDS_PER_BUCKET}")
+        .where(f"$.{BIN_NAME}:MAP.count() >= {MAX_RECORDS_PER_BUCKET}")
         .bin("minorityOut").select_from(minority_ael)
         .bin(BIN_NAME).on_map_index_range(-MINOR_SPLIT_ITEMS).remove(return_type=MapReturnType.COUNT)
         .execute()
@@ -278,7 +267,7 @@ def _latest_timestamp(end_timestamp: int | None) -> int:
 
 
 def get_events_between(
-    session: SyncSession,
+    session: Session,
     account_id: str,
     start_timestamp: int | None = None,
     end_timestamp: int | None = None,
@@ -331,7 +320,7 @@ def get_events_between(
 
 
 def _process_root_and_continuations(
-    session: SyncSession, root_key, earliest_event_id: str, latest_event_id: str,
+    session: Session, root_key, earliest_event_id: str, latest_event_id: str,
     count: int, results: list[Event], direction: str, device_filter: set[str] | None,
 ) -> None:
     row = session.query(root_key).execute().first()
@@ -362,21 +351,21 @@ def _process_root_and_continuations(
 
 
 def get_events_before(
-    session: SyncSession, account_id: str, event_id: str | None = None,
+    session: Session, account_id: str, event_id: str | None = None,
     count: int = 50, device_ids: Sequence[str] = (),
 ) -> list[Event]:
     return get_events_between(session, account_id, None, None, event_id, count, DESCENDING, device_ids)
 
 
 def get_events_after(
-    session: SyncSession, account_id: str, event_id: str,
+    session: Session, account_id: str, event_id: str,
     count: int = 50, device_ids: Sequence[str] = (),
 ) -> list[Event]:
     return get_events_between(session, account_id, None, None, event_id, count, ASCENDING, device_ids)
 
 
 def _read_filtered_bucket(
-    session: SyncSession, key, earliest_event_id: str, latest_event_id: str,
+    session: Session, key, earliest_event_id: str, latest_event_id: str,
     device_filter: set[str] | None,
 ) -> list:
     """See time_series_demo.py's ``_read_filtered_bucket`` for the native-CDT-range-plus-
@@ -474,7 +463,7 @@ def display_events(events: list[Event]) -> None:
         print(f"{i:2d}: {event.id} - {event.timestamp} - {event.device_id}")
 
 
-def _generate_sample_data(session: SyncSession) -> None:
+def _generate_sample_data(session: Session) -> None:
     devices_created = 0
     events_created = 0
 
@@ -503,7 +492,7 @@ def _generate_sample_data(session: SyncSession) -> None:
             print(f"{account_num:,} accounts, {devices_created:,} devices, {events_created:,} events")
 
 
-def _demonstrate_queries(session: SyncSession) -> None:
+def _demonstrate_queries(session: Session) -> None:
     print("First list -- acct-1, all devices")
     events = get_events_before(session, "acct-1", None, 50)
     display_events(events)
@@ -573,9 +562,9 @@ class TimeSeriesLargeVarianceDemo(UseCase):
     def get_reference(self) -> str:
         return "https://github.com/aerospike-examples/use-case-cookbook/blob/main/UseCases/timeseries-large-variance.md"
 
-    def setup(self, session: SyncSession) -> None:
+    def setup(self, session: Session) -> None:
         session.truncate(EVENTS)
         _generate_sample_data(session)
 
-    def run(self, session: SyncSession) -> None:
+    def run(self, session: Session) -> None:
         _demonstrate_queries(session)

@@ -9,9 +9,9 @@ split-point eventIds, used to locate sub-records on both read and write.
 the common case - falling back to ``run_in_transaction`` only when the root block has split or
 this write would overflow it.
 
-``_split_bucket`` removes the minority slice in one ``where()``-gated call (a no-op if another
-writer already split it), reading the minority via AEL and removing the majority via a native CDT
-op in the same round trip.
+``_split_bucket`` reads the minority slice and removes it from the majority in one call, each side
+self-gated by its own ``when(count() >= N => ..., default => ...)`` so a race with another writer
+that already split the bucket is a no-op - same technique as ../../java-sdk's ``splitBucket``.
 
 ``MINOR_SPLIT_ITEMS`` is a fixed item count, not a percentage of the bucket's current size - AEL
 selector bounds must be static literals, so a computed bound like ``count() * 80 / 100`` isn't
@@ -23,7 +23,7 @@ import uuid
 from collections.abc import Sequence
 from datetime import datetime, timezone
 
-from aerospike_async import ListOrderType, MapOrder, MapReturnType, ResultCode
+from aerospike_async import ListOrderType, MapOrder, ResultCode
 from aerospike_sdk import DataSet
 from aerospike_sdk.exceptions import AerospikeError
 from aerospike_sdk.sync import Session
@@ -198,21 +198,28 @@ def _write_event_and_get_bucket_size(session: Session, key, event: Event, set_ex
 
 
 def _split_bucket(session: Session, root_key, bucket_key) -> None:
-    """Split an overflowing bucket: read its oldest ``MINOR_SPLIT_ITEMS`` events and remove them
-    in one gated call, then - if anything was removed - persist the minority slice to a new
-    continuation sub-record and record the split point on the root's ``cont`` list.
+    """Split an overflowing bucket: read its oldest ``MINOR_SPLIT_ITEMS`` events and remove them,
+    then - if anything was removed - persist the minority slice to a new continuation sub-record
+    and record the split point on the root's ``cont`` list.
 
-    The ``where(...)`` guard re-checks the size rather than trusting the caller, since
-    ``upsert_event`` calls this right after a write that may have raced with another writer under
-    the non-transactional fallback (see usecasecookbook/txn.py).
+    Each bin's own ``when(count() >= N => ..., default => ...)`` re-checks the size rather than
+    trusting the caller, since ``upsert_event`` calls this right after a write that may have raced
+    with another writer under the non-transactional fallback (see usecasecookbook/txn.py) - same
+    technique as ../../java-sdk's ``splitBucket``.
     """
-    minority_ael = f"$.{BIN_NAME}.{{-{MINOR_SPLIT_ITEMS}:}}.getMaps():UNORDERED"
+    minority_ael = (
+        f"when ($.{BIN_NAME}:MAP.count() >= {MAX_RECORDS_PER_BUCKET} => "
+        f"$.{BIN_NAME}.{{-{MINOR_SPLIT_ITEMS}:}}.getMaps(), default => {{}})"
+    )
+    majority_ael = (
+        f"when ($.{BIN_NAME}:MAP.count() >= {MAX_RECORDS_PER_BUCKET} => "
+        f"$.{BIN_NAME}.{{-{MINOR_SPLIT_ITEMS}:}}.remove(), default => $.{BIN_NAME}.{{0:}}.getMaps())"
+    )
 
     row = (
         session.upsert(bucket_key)
-        .where(f"$.{BIN_NAME}:MAP.count() >= {MAX_RECORDS_PER_BUCKET}")
         .bin("minorityOut").select_from(minority_ael)
-        .bin(BIN_NAME).on_map_index_range(-MINOR_SPLIT_ITEMS).remove(return_type=MapReturnType.COUNT)
+        .bin(BIN_NAME).upsert_from(majority_ael)
         .execute()
         .first()
     )

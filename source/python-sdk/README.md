@@ -31,7 +31,7 @@ If no seed host is passed, `localhost:3000` is assumed — use `--hosts <host:po
 elsewhere, and `--help` for the rest of the connection options (`-U`/`-P` for INTERNAL-mode auth,
 `-cn` for cluster name, `-sa` for services-alternate). The namespace defaults to `test`; override
 with the `DEMO_NAMESPACE` environment variable (this module's equivalent of the other two modules'
-`-Ddemo.namespace` JVM system property — Python has no per-process system-property mechanism).
+`-Ddemo.namespace` JVM system property).
 
 CLI options:
 - `-uc, --useCaseName <name>` — run a use case (partial name match allowed); if omitted, launches
@@ -85,23 +85,14 @@ full scan opt in with `.with_hint(QueryHint(allow_scans_with_where=True))` (see
 `advancedexpressions/advanced_expressions.py`). Single-key and batch (explicit key list) queries
 are unaffected.
 
-**CDT builder API is close to 1:1 with the Java SDK's** — `on_map_key`/`on_map_index`/
-`on_map_key_range`/`on_map_value_range`/`on_map_key_relative_index_range`/`on_list_index`/etc. exist
-on both read and write builders here.
-
-Selector operands (`{...}`/`[...]`) must be static literals, not computed expressions — a
-canonical-grammar constraint, not an SDK-specific gap.
-`timeseries/time_series_large_variance_demo.py`'s bucket-split point is a fixed item count rather
-than a computed percentage for this reason.
-
 ## Known limitations (alpha SDK)
 
 - **This cluster's `test` namespace needs `strong-consistency` for real multi-record
   transactions**, same as `../java`/`../java-sdk`. `Session.is_namespace_sc(namespace)` reports
   this directly. `usecasecookbook/txn.py`'s `run_in_transaction(session, fn)` calls
   `session.do_in_transaction(fn)` when SC is on, or just `fn(session)` directly when it's off —
-  `TransactionalSession` is a superset of `Session` for every method a use case calls, so no
-  subclassing/proxying is needed the way the Java SDK's `NonTransactionalCapableSession` requires.
+  `TransactionalSession` is a superset of `Session`, so no subclassing/proxying is needed, unlike
+  the Java SDK's `NonTransactionalCapableSession`.
 - `aerospike_async.Key` objects are **not hashable** in this SDK, unlike the Java client's `Key` —
   code that needs a per-key lookup structure (e.g. `hotkeys/reducer.py`'s batching map) keys on
   `key.digest` (a hashable `str`) instead.
@@ -114,4 +105,4 @@ than a computed percentage for this reason.
   `get-config`/`set-config` text) for that instead.
 
 None of the above are code bugs to "fix" in this port — they're the actual current behavior of the
-SDK build this was written against (`aerospike-sdk==0.9.0a6.dev95`).
+SDK build pinned in `requirements.txt`.

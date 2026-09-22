@@ -1,37 +1,24 @@
 """Port of the legacy DeltaVersioningRecords (see ../../java and ../../java-sdk). Same
-TradeBase live-record-plus-``versions``-map model as VersioningRecords, but instead of
-copying the entire prior record to a historical key on every change, each update writes
-a small *delta* audit record (``id:version``) describing only which bins changed and how
-(``Inserted``/``Changed``/``TypeChanged``/``Removed``/``Same``), plus their new values -
-enough to reconstruct any past version by replaying deltas from version 0 forward.
+TradeBase live-record-plus-``versions``-map model as VersioningRecords, but each update writes a
+small *delta* audit record (``id:version``) describing only which bins changed and how
+(``Inserted``/``Changed``/``TypeChanged``/``Removed``/``Same``), plus their new values - enough
+to reconstruct any past version by replaying deltas from version 0 forward.
 
-Like the Java SDK port, this classifies bin-level deltas entirely server-side in one
-``operate()``-style call: for each bin the caller's change touches, snapshot its current
-value into a temporary bin (``_t0``, ``_t1``, ...) via an expression write, apply the
-caller's own operations unmodified, then compare each temp snapshot against the bin's new
-value via an expression read, writing the classification into a result label (``_a0``,
-``_a1``, ...). The live-record update and the delta audit record insert remain two
-round trips total, matching the Java port - not three, which a naive
-read-before/write/read-after client-side diff would need.
+Like ../../java-sdk, this classifies bin-level deltas server-side in one ``operate()`` call:
+snapshot each changed bin into a temp bin, apply the caller's own operations, then compare each
+snapshot against the new value and write the classification to a result label. The live-record
+update and the delta-record insert stay at two round trips total.
 
-``changed_bins``/``apply_ops`` is this port's equivalent of the Java version's
-``List<Operation> userOps`` parameter: the caller declares which bin names its change will
-touch (so the snapshot/compare expressions can be built ahead of the write) and supplies a
-callback that chains the actual write operations onto the builder - which can be a blind
-increment (``.add(...)``) or any other CDT write, without the caller ever needing to know
-the resulting value up front. Python has no standalone ``Operation`` value type to inspect
-bin names from the way Java does, so the bin list is passed explicitly instead of derived.
+``changed_bins``/``apply_ops`` is this port's equivalent of ../../java-sdk's
+``List<Operation> userOps``: the caller declares which bins its change touches and supplies a
+callback that chains the actual writes - a blind increment or any other CDT write, without
+needing to know the resulting value up front.
 
-This SDK's AEL grammar has no write-shaped terminals (see ``../README.md``), so the
-server-side snapshot/compare/versions-bookkeeping expressions here are built with
-``aerospike_sdk.Exp`` (``FilterExpression``) instead - a near-complete
-``Exp``/``MapExp``/``ListExp``-equivalent builder, confirmed by testing against a live
-cluster rather than assumed. One read (the pre-update ``version`` value, needed to number
-the delta record even though most of the session doesn't otherwise need it) is expressed
-as a genuine AEL string (``.select_from("when(...)")``) alongside the ``Exp``-based writes
-in the same call, demonstrating - as the Java port's own reviewer asked for - that AEL and
-expression operations can be freely mixed within one call rather than a call needing to be
-one or the other.
+The versions-map bookkeeping uses ``aerospike_sdk.Exp`` rather than AEL strings, for the same
+reason ../../java-sdk does: closing the entry currently marked ``-1`` needs a map key discovered
+at runtime by value, and AEL selector operands must be static literals. One read (the pre-update
+``version``) is a genuine AEL string alongside the ``Exp``-based writes in the same call, since
+AEL and ``Exp`` mix freely.
 """
 
 from collections.abc import Callable
@@ -62,10 +49,8 @@ VERSIONS_MAP_POLICY = MapPolicy(MapOrder.KEY_ORDERED, MapWriteMode.UPDATE)
 
 ApplyOps = Callable[[object], object]
 
-# Aerospike's server-side particle-type codes, needed for the bin_type() comparisons
-# below - confirmed empirically against a live cluster, since this SDK doesn't expose a
-# public constant set for these the way the Java client's
-# com.aerospike.client.sdk.command.ParticleType does.
+# Aerospike's server-side particle-type codes, needed for the bin_type() comparisons below -
+# this SDK doesn't expose a public constant set for these.
 _INTEGER, _FLOAT, _STRING, _BOOL = 1, 2, 3, 17
 
 _TYPED_BIN_GETTERS = {
@@ -223,10 +208,8 @@ class DeltaVersioningRecords(UseCase):
             key = TRADE_BASES.id(trade_id)
             change_ts = int(timestamp) if timestamp else _now_millis()
 
-            # The one genuinely AEL-expressible piece of this call: the pre-update
-            # "version" value, read before the Exp write below touches it (an AEL read of
-            # a bin an Exp op already wrote in the same call fails validation; the reverse
-            # order doesn't).
+            # Must read pre-update "version" before the Exp write below touches it - an AEL
+            # read of a bin an Exp op already wrote in the same call fails validation.
             builder = tx.upsert(key).bin("version_old").select_from(
                 "when($.version.exists() == false => -1, default => $.version)"
             )

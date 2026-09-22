@@ -1,32 +1,19 @@
 """Port of ../../../java-sdk's hotkeys/helper/HotKeyReducer.java (itself vendored from the
-standalone hot-key-reducer project, see ../../java's hotkeys.helper package). Batches
-concurrent operate calls against the same hot key within the process into a single Aerospike
-operate call, then unpacks the combined result back to each caller.
+standalone hot-key-reducer project, see ../../java's hotkeys.helper package). Batches concurrent
+operate calls against the same hot key within the process into a single Aerospike operate call,
+then unpacks the combined result back to each caller.
 
-The Java SDK port replaced the legacy client's per-bin-name counting/index bookkeeping with a
-simple index-range slice of ``Record.results[]`` (per-operation results in submission order,
-regardless of bin name). This SDK has no equivalent: ``aerospike_async.Record`` only exposes
-``bins`` (a dict keyed by bin name) - there is no positional per-operation results array
-(confirmed both by reading ``aerospike_sdk.operation_result``'s module docstring - "A positional
-Record.results array indexed in operation order is not yet exposed by the underlying async
-client" - and empirically: a merged operate call touching the same bin name N times comes back
-as ``bins[name] == [v0, v1, ..., vN-1]`` in submission order, exactly like the legacy client's
-behavior). So this port keeps the legacy client's per-bin-name counting approach: for each bin
-name, track how many total operations reference it across the whole batch and how many of those
-belong to this caller, then slice the (possibly list-valued) aggregated result accordingly.
+This SDK has no positional per-operation results array (``aerospike_async.Record`` only exposes
+``bins``, keyed by bin name), so results are unpacked with per-bin-name counting instead: for each
+bin, track how many total operations reference it across the batch and how many belong to this
+caller, then slice the (possibly list-valued) aggregated result accordingly.
 
-A further, real API difference from both prior ports: ``aerospike_async.Operation`` objects are
-opaque (no ``bin_name`` accessor, unlike the legacy client's public ``Operation.binName`` field),
-so the bin-name bookkeeping can't be recovered by inspecting an ``Operation`` after the fact.
-``submit()`` therefore takes ``(bin_name, Operation)`` pairs instead of raw ``Operation`` objects
-- the caller already knows the bin name (it built the ``Operation`` from it), so this costs
-nothing at the call site while letting the reducer do the same counting the legacy client did.
+``aerospike_async.Operation`` objects are opaque (no ``bin_name`` accessor), so ``submit()`` takes
+``(bin_name, Operation)`` pairs rather than raw ``Operation``s - the caller already knows the bin
+name it built the operation from.
 
-Raw ``Operation`` objects are merged into one write via ``WriteSegmentBuilder.add_operation`` -
-the public equivalent of the legacy/Java-SDK clients' ``operate(...)``/``appendOperations(...)``,
-even though its one-line docstring ("used by CDT action builders") undersells that it's meant for
-exactly this. Unlike the chainable ``.bin(x).add(1)`` builder methods, ``add_operation`` mutates
-the builder in place and returns ``None`` rather than ``self``.
+Raw ``Operation``s are merged into one write via ``WriteSegmentBuilder.add_operation`` (mutates
+the builder in place and returns ``None``, unlike the chainable ``.bin(x).add(1)`` methods).
 """
 
 import threading
@@ -99,12 +86,10 @@ class _SubmittedOps:
             self.ops.append(_SubmittedOp(bin_name, operation, bin_index))
 
     def finish(self, aggregated_bins: dict[str, Any], all_bin_counts: dict[str, int]) -> None:
-        """Extract this caller's slice of the combined result.
-
-        Mirrors the legacy client's ``SubmittedOps.formRecordForTheseOps``: a bin touched once
-        across the whole batch comes back as a scalar; touched more than once, it comes back as
-        a list (in submission order) and each caller picks out its own index (or indices, if the
-        same caller touched the same bin more than once in its own submission).
+        """Extract this caller's slice of the combined result: a bin touched once across the
+        whole batch comes back as a scalar; touched more than once, it comes back as a list (in
+        submission order) and each caller picks out its own index (or indices, if it touched the
+        same bin more than once itself).
         """
         result: dict[str, Any] = {}
         for op in self.ops:
@@ -170,8 +155,8 @@ class _KeyStats:
 
 class _ReducerMonitor:
     """Monitors key access patterns to determine when the reducer should batch a key's
-    operations. Keyed by ``key.digest`` (a hashable str) rather than ``Key`` itself, since
-    ``Key`` is not hashable in this SDK (confirmed empirically: ``hash(key)`` raises TypeError).
+    operations. Keyed by ``key.digest`` (a hashable str) rather than ``Key`` itself, since ``Key``
+    is not hashable in this SDK.
     """
 
     def __init__(self, accesses_per_ms_for_hot: int, ms_to_keep_hot: int) -> None:

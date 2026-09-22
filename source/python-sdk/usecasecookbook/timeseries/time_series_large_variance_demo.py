@@ -3,31 +3,19 @@ bucketed time-series model as time_series_demo.py, but each bucket record adapti
 it holds more than ``MAX_RECORDS_PER_BUCKET`` events: the oldest ``PERCENT_EVENTS_IN_ORIG_BUCKET``
 percent stay in the original ("root") record, and the rest move to a new continuation sub-record
 named after the lowest eventId it holds. The root record's ``cont`` bin holds an ascending list of
-these split-point eventIds, so a query walks that list to find which sub-record(s) it needs, and a
-write walks it to find which sub-record a new event belongs in (recursing into that sub-record's
-own split if it, in turn, overflows).
+split-point eventIds, used to locate sub-records on both read and write.
 
-``upsert_event`` tries ``_try_write_to_root_block`` first: a single non-transactional, filtered
-``upsert().where(...)`` call that succeeds without ever opening a transaction as long as the root
-block hasn't split and has room - the common case. Only when that filter blocks the write (root
-already split, or this write would overflow it) does ``upsert_event`` fall back to
-``run_in_transaction`` to find or create the right target block.
+``upsert_event`` tries a single non-transactional, filtered ``upsert().where(...)`` write first -
+the common case - falling back to ``run_in_transaction`` only when the root block has split or
+this write would overflow it.
 
-``_split_bucket`` detects overflow and removes the minority slice in one call against the bucket
-record, gated by ``where()`` so the whole operate() is a no-op if another writer already handled
-the split (or the bucket has since shrunk back under the threshold): the minority read (cross-bin,
-via an AEL ``select_from``) and the majority removal (same-bin, via a native CDT
-``on_map_index_range(...).remove()`` op) run as two ops in that one gated call - one atomic round
-trip. A single self-gated ``when(count >= N => ...remove(), default => $.map)`` expression per op
-(matching each op's own condition, no external ``.where()``) also works here and is closer to how
-../../java-sdk phrases it, but duplicates the count check across both ops for no behavioral
-difference; this port keeps the single shared ``.where()`` gate.
+``_split_bucket`` removes the minority slice in one ``where()``-gated call (a no-op if another
+writer already split it), reading the minority via AEL and removing the majority via a native CDT
+op in the same round trip.
 
-The split point (``MINOR_SPLIT_ITEMS``) is a fixed item count rather than a percentage of the
-bucket's current size: like the java-sdk port, a computed bound (e.g. ``count() * 80 / 100``)
-isn't expressible - a genuine canonical-grammar constraint ("Selector operands are static literals
-only... not parenthesised expressions", explicitly marked "will change in a later release"), not
-an SDK-specific gap.
+``MINOR_SPLIT_ITEMS`` is a fixed item count, not a percentage of the bucket's current size - AEL
+selector bounds must be static literals, so a computed bound like ``count() * 80 / 100`` isn't
+expressible.
 """
 
 import random
@@ -115,10 +103,8 @@ def upsert_event(session: Session, event: Event, set_expiry: bool) -> None:
     if _try_write_to_root_block(session, root_key, event, set_expiry):
         return
 
-    # The fast path above was filtered out - the root block has either already split, or this
-    # write would overflow it - so a transaction (with its extra reads) is genuinely needed to
-    # find or create the right target block. Every other write short-circuits before ever
-    # opening one.
+    # Fast path was filtered out (root already split, or this write would overflow it) - a
+    # transaction is needed to find or create the right target block.
     def _find_and_write(tx: Session) -> None:
         continuation = _read_continuation_list(tx, root_key)
         target_key = root_key
@@ -213,14 +199,12 @@ def _write_event_and_get_bucket_size(session: Session, key, event: Event, set_ex
 
 def _split_bucket(session: Session, root_key, bucket_key) -> None:
     """Split an overflowing bucket: read its oldest ``MINOR_SPLIT_ITEMS`` events and remove them
-    from the bucket in one gated call (see the module docstring for why this isn't a single
-    ``when(...)`` expression), then - if anything was removed - persist that minority slice to a
-    new continuation sub-record and record the split point on the root record's (ascending,
-    ordered) ``cont`` list.
+    in one gated call, then - if anything was removed - persist the minority slice to a new
+    continuation sub-record and record the split point on the root's ``cont`` list.
 
-    The ``where(...)`` guard re-checks the size rather than trusting the caller, because
-    ``upsert_event`` calls this right after a separate write that may have raced with another
-    writer (under the non-transactional fallback - see usecasecookbook/txn.py).
+    The ``where(...)`` guard re-checks the size rather than trusting the caller, since
+    ``upsert_event`` calls this right after a write that may have raced with another writer under
+    the non-transactional fallback (see usecasecookbook/txn.py).
     """
     minority_ael = f"$.{BIN_NAME}.{{-{MINOR_SPLIT_ITEMS}:}}.getMaps():UNORDERED"
 
@@ -368,22 +352,26 @@ def _read_filtered_bucket(
     session: Session, key, earliest_event_id: str, latest_event_id: str,
     device_filter: set[str] | None,
 ) -> list:
-    """See time_series_demo.py's ``_read_filtered_bucket`` for the native-CDT-range-plus-
-    client-side-device-filter rationale (this module's ``_split_bucket`` docstring covers the
-    separate AEL limitation hit while porting the write side)."""
-    stream = (
-        session.query(key).bin(BIN_NAME)
-        .on_map_key_range(earliest_event_id, latest_event_id)
-        .get_values()
-        .execute()
-    )
+    """Same technique as time_series_demo.py's ``_read_filtered_bucket``: with a device filter,
+    the key-range selection and device-id filter run in one server-side AEL expression; without
+    one, the native ``on_map_key_range(...).get_values()`` CDT operation is used directly.
+    """
+    if device_filter:
+        device_list = ", ".join(f"'{device_id}'" for device_id in device_filter)
+        ael = f'$.{BIN_NAME}.{{@"{earliest_event_id}":"{latest_event_id}"}}&[?(@.[0] in [{device_list}])]'
+        stream = session.query(key).bin(BIN_NAME).select_from(ael).execute()
+    else:
+        stream = (
+            session.query(key).bin(BIN_NAME)
+            .on_map_key_range(earliest_event_id, latest_event_id)
+            .get_values()
+            .execute()
+        )
     row = stream.first()
     stream.close()
     if row is None or row.record is None:
         return []
     entries = row.record.bins.get(BIN_NAME) or []
-    if device_filter:
-        entries = [entry for entry in entries if entry[0] in device_filter]
     return entries
 
 

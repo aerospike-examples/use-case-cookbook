@@ -4,16 +4,12 @@ javadoc). A scoreboard is stored as a key-ordered map per score "bucket"
 ``"score-playerId"`` composite string (so map key order == score order) and each map
 value is the player id.
 
-Reading the players around a given score/player uses this SDK's
-``on_map_key_relative_index_range`` CDT read builder (available on both the query and
-write bin builders in this SDK, unlike ../../java-sdk where the equivalent AEL relative-
-range selector needed a raw ``select_from`` string) to fetch a clamped index range
-either side of the player's map key in a single round trip - verified to clamp
-gracefully at the bucket's boundaries and, when the anchor key is stale (the player's
-score changed concurrently between the caller reading it and this method running), to
-fall back to the range around where that key would sort. Overflow past the current
-bucket's boundary is then resolved by reading extra keys from neighboring buckets via
-``on_map_index_range``, exactly mirroring ../../java's addOverflow*PlayersIfNeeded.
+Reading the players around a given score/player uses ``on_map_key_relative_index_range`` to
+fetch a clamped index range either side of the player's map key in one round trip - it clamps at
+the bucket's boundaries and, when the anchor key is stale (the player's score changed
+concurrently), falls back to the range around where that key would sort. Overflow past the
+current bucket's boundary is then resolved by reading extra keys from neighboring buckets via
+``on_map_index_range``, mirroring ../../java's addOverflow*PlayersIfNeeded.
 """
 
 import random
@@ -235,11 +231,9 @@ class Leaderboard(UseCase):
     def get_scores_around_player(
         self, session: Session, player_id: int, score: int, num_players_either_side: int,
     ) -> list[ScoreEntry]:
-        """Gets the scores on either side of a player's score. Reads a clamped index range
-        either side of the player's map key directly via ``on_map_key_relative_index_range``,
-        pulling in extra entries from neighboring buckets if the range overflows the current
-        bucket. Returns entries with just ``id``/``score`` populated - see
-        :meth:`populate_full_player_details` for the rest.
+        """Gets the scores on either side of a player's score (see module docstring). Returns
+        entries with just ``id``/``score`` populated - see :meth:`populate_full_player_details`
+        for the rest.
         """
         map_key = self._map_key(player_id, score)
         bucket = self._determine_bucket_for_score(score)
@@ -255,13 +249,9 @@ class Leaderboard(UseCase):
         if row is not None and row.is_ok and row.record is not None:
             combined = list(row.record.bins.get(SCOREBOARD_BIN) or [])
 
-        # mapKey may no longer be present if the player's score changed concurrently between
-        # the caller reading it and this query running (the anchor for the relative-range
-        # read above is that now-stale score) - the read still returns a range centered on
-        # where that key WOULD sort, so a plain index()/-1 check doesn't work: the stale key
-        # could sort anywhere in combined, not just past the end. combined is lexically
-        # sorted (a key-ordered map's key range), so bisect's insertion-point fallback gives
-        # the correct split point in every case, found or not.
+        # map_key may be stale (the player's score changed concurrently) and absent from
+        # combined - bisect_left gives the correct split point either way, since combined is
+        # lexically sorted regardless of whether map_key is actually present in it.
         pos = bisect_left(combined, map_key)
         lower = combined[:pos]
         higher = combined[pos:]

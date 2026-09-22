@@ -7,8 +7,7 @@ use case per se but a set of techniques for advanced expression usage:
 
 All three port to AEL exactly as ../../java-sdk has them - including technique 3's single
 nested ``let``/``when`` write with ``append(value)`` branches, which requires server-side AEL
-compilation (Aerospike 8.2.0+) to parse; see ``../README.md``'s "Expressions: AEL" section for
-what that depends on and why it wasn't available earlier in this port.
+compilation (Aerospike 8.2.0+; see ``../README.md``).
 """
 
 import random
@@ -100,10 +99,8 @@ class AdvancedExpressions(UseCase):
 
         self._multiple_commands_in_one_operation(session)
 
-        # AEL's append(value) can't create a missing list bin (confirmed empirically:
-        # OpNotApplicable both bare and with a :UNSORTED create-order suffix), so the bin is
-        # created via the native CDT builder first; the append and the typed read-back into
-        # "counter" both use AEL, matching ../../java-sdk's "$.acc.[0]:INT".
+        # AEL's append(value) can't create a missing list bin, so it's created via the native
+        # CDT builder first; the append and the typed read-back both use AEL.
         key = CARS.id(1)
         session.upsert(key).bin("acc").list_create(ListOrderType.UNORDERED).execute()
         session.upsert(key).bin("acc").upsert_from("$.acc.append(10)").execute()
@@ -120,10 +117,8 @@ class AdvancedExpressions(UseCase):
         self._show_cars_matching_expression(session, f"$.color in [{color_list}]", 10)
 
     def _multiple_commands_in_one_operation(self, session: Session) -> None:
-        """Adds all 4 conditional features in ONE write via a 4-level nested AEL ``let``/
-        ``when`` expression, each branch appending a string with ``$.features.append('...')`` -
-        exactly matching ../../java-sdk's ``multipleCommandsInOneOperation``. Requires
-        server-side AEL compilation (Aerospike 8.2.0+); see ``../README.md``.
+        """Adds all 4 conditional features in ONE write via a 4-level nested AEL ``let``/``when``
+        expression, matching ../../java-sdk's ``multipleCommandsInOneOperation``.
         """
         key = CARS.id(1)
         session.upsert(key).bin("color").set_to("Purple").execute()

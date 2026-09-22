@@ -77,63 +77,50 @@ This SDK supports **AEL** (Aerospike Expression Language) via `.where(ael_string
 `insert_from`/`update_from` (computed writes) — the same canonical grammar `../java-sdk` uses,
 including type-suffix path pins (`$.bin:INT`), write-shaped path terminals (`.append(value)`,
 `.putItems(...)`, etc.), and wildcard/key-range filter chains (`&[?(...)]`). AEL strings are
-compiled **server-side** rather than parsed locally, which is why this needs Aerospike 8.2.0+ (see
-Setup above) and the internal SDK build pinned in `requirements.txt` - an earlier, now-corrected
-version of this doc described several of these as permanent gaps in this SDK's own AEL dialect;
-they weren't - they were artifacts of testing against `aerospike-sdk==0.9.0a5`'s bundled
-client-side parser, which predates server-side AEL compilation and implements an older, divergent
-local grammar. Every use case in this port that needed one of these constructs now uses genuine
-AEL for it (`advancedexpressions/advanced_expressions.py`'s single nested `let`/`when` write,
-`timeseries/time_series_demo.py`'s server-side device filter, `transactionprocessing/top_transactions_across_dcs.py`'s
-`putItems`-based cross-DC merge).
+compiled **server-side**, which is why this needs Aerospike 8.2.0+ and the internal SDK build
+pinned in `requirements.txt` (see Setup above).
 
-`recordversioning/delta_versioning_records.py` is the one deliberate exception: it uses the
-programmatic `aerospike_sdk.Exp` (`FilterExpression`) builder instead of AEL strings for its
-snapshot-and-compare technique, for the same reason `../java-sdk` does - a map key discovered at
-runtime by value can't address a write in AEL, since selector operands must be static literals.
-`select_from`/`insert_from`/`update_from`/`upsert_from` all accept `Union[str, FilterExpression]`,
-so AEL strings and `Exp` trees can be freely mixed within one call - see that module's docstring.
+`recordversioning/delta_versioning_records.py` is the one place that uses the programmatic
+`aerospike_sdk.Exp` (`FilterExpression`) builder instead of an AEL string, for the same reason
+`../java-sdk` does: its snapshot-and-compare technique needs to close a map entry discovered at
+runtime by value, and AEL selector operands must be static literals. `select_from`/`insert_from`/
+`update_from`/`upsert_from` all accept `Union[str, FilterExpression]`, so AEL and `Exp` mix freely
+within one call.
 
-**Dataset-level `.where()` queries now require a secondary index** (or an explicit opt-in) on
-clusters with query selection, which 8.2.0 has: a `.where()` query the server can't satisfy with an
-index is rejected rather than silently falling back to a full-set scan. Use cases here that
-intentionally do a full scan (no index exists on the filtered bin) opt in explicitly with
-`.with_hint(QueryHint(allow_scans_with_where=True))` - see `advancedexpressions/advanced_expressions.py`.
-Single-key and batch (explicit key list) queries are unaffected.
+**Dataset-level `.where()` queries require a secondary index** (or an explicit opt-in) on clusters
+with query selection, which 8.2.0 has — a `.where()` query the server can't satisfy with an index
+is rejected rather than falling back to a full-set scan. Use cases here that intentionally do a
+full scan opt in with `.with_hint(QueryHint(allow_scans_with_where=True))` (see
+`advancedexpressions/advanced_expressions.py`). Single-key and batch (explicit key list) queries
+are unaffected.
 
 **CDT builder API is close to 1:1 with the Java SDK's** — `on_map_key`/`on_map_index`/
 `on_map_key_range`/`on_map_value_range`/`on_map_key_relative_index_range`/`on_list_index`/etc. exist
-on **both** read and write builders in this SDK (no read/write asymmetry gap for
-`on_map_key_relative_index_range` the way the Java SDK's alpha build had).
+on both read and write builders here.
 
-One remaining genuine (server-side, version-independent) constraint: selector operands (`{...}`/
-`[...]`) must be static literals, not computed expressions - explicitly documented as such in the
-canonical AEL grammar itself, not an SDK-specific gap. `timeseries/time_series_large_variance_demo.py`'s
-bucket-split point is a fixed item count rather than a computed percentage for this reason.
+Selector operands (`{...}`/`[...]`) must be static literals, not computed expressions — a
+canonical-grammar constraint, not an SDK-specific gap.
+`timeseries/time_series_large_variance_demo.py`'s bucket-split point is a fixed item count rather
+than a computed percentage for this reason.
 
 ## Known limitations (alpha SDK)
 
 - **This cluster's `test` namespace needs `strong-consistency` for real multi-record
-  transactions**, same as `../java`/`../java-sdk`. Detection is much simpler here than on the Java
-  SDK side: `Session.is_namespace_sc(namespace)` reports this directly (no throwaway-write
-  probe needed). `usecasecookbook/txn.py`'s `run_in_transaction(session, fn)` calls
-  `session.do_in_transaction(fn)` when SC is on, or just `fn(session)` directly (no real transaction
-  object at all) when it's off — since `TransactionalSession` is a superset of `Session` for
-  every method a use case actually calls, no subclassing/proxying is needed the way the Java SDK's
-  `NonTransactionalCapableSession` shim requires.
+  transactions**, same as `../java`/`../java-sdk`. `Session.is_namespace_sc(namespace)` reports
+  this directly. `usecasecookbook/txn.py`'s `run_in_transaction(session, fn)` calls
+  `session.do_in_transaction(fn)` when SC is on, or just `fn(session)` directly when it's off —
+  `TransactionalSession` is a superset of `Session` for every method a use case calls, so no
+  subclassing/proxying is needed the way the Java SDK's `NonTransactionalCapableSession` requires.
 - `aerospike_async.Key` objects are **not hashable** in this SDK, unlike the Java client's `Key` —
   code that needs a per-key lookup structure (e.g. `hotkeys/reducer.py`'s batching map) keys on
-  `key.digest` (a hashable `str`) instead of the `Key` object itself.
-- No per-operation results array equivalent to the Java SDK's `Record.results[]` was found for a
-  same-bin multi-`.add()` write with no read-back requested — such a write returns an empty `bins`
-  dict. `hotkeys/reducer.py` doesn't need per-operation unpacking either way (callers only care about
-  success/failure), so this wasn't a blocker, just a simplification opportunity the Java SDK had that
-  this port didn't need.
+  `key.digest` (a hashable `str`) instead.
+- No per-operation results array equivalent to the Java SDK's `Record.results[]` — a same-bin
+  multi-`.add()` write with no read-back returns an empty `bins` dict. `hotkeys/reducer.py` doesn't
+  need per-operation unpacking either way.
 - `session.info().namespace_details(namespace)` returns a structured `NamespaceDetail` with a fixed
-  field set (`keys`/`exists`/`strong_consistency`/`nsup_period`) that doesn't include arbitrary
-  config like `transaction-pending-limit`. `hotkeys/pending_limit_scope.py` uses the generic
-  `session.info().info(command)` (raw `get-config`/`set-config` text, same shape as the other two
-  modules' Info-protocol usage) for that instead.
+  field set that doesn't include arbitrary config like `transaction-pending-limit`.
+  `hotkeys/pending_limit_scope.py` uses the generic `session.info().info(command)` (raw
+  `get-config`/`set-config` text) for that instead.
 
 None of the above are code bugs to "fix" in this port — they're the actual current behavior of the
 SDK build this was written against (`aerospike-sdk==0.9.0a6.dev95`).

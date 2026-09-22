@@ -3,16 +3,10 @@ class's javadoc). Reuses :class:`~usecasecookbook.gaming.leaderboard.Leaderboard
 scoreboard update/query logic for scoring, and layers matchmaking on top via AEL
 ``where()`` filters for conditional (compare-and-swap style) writes.
 
-Deliberate simplification vs. ../../java-sdk: that port has to manually decode a
-``Player`` from an upsert-with-read-back ``Record`` because its object mapper's 3-arg
-``fromMap`` throws outside the SDK's typed-query path, and deliberately avoids reading
-back a bin it just wrote in the same call (a multi-result-wrapper gotcha found on that
-SDK). Neither issue exists here: this SDK has no object mapper (every model is decoded
-by hand via ``Player.from_bins`` regardless), and empirically read-your-own-write in one
-call returns a plain scalar, not a wrapper (verified against the live cluster - a
-same-call ``bin("score").set_to(999)`` followed by ``bin("score").get()`` came back as
-the plain int ``999``). So this port simply reads back every bin it needs, written or
-not, in one round trip.
+Simpler than ../../java-sdk here: this SDK has no object mapper (every model is decoded
+by hand via ``Player.from_bins``), and reading back a bin in the same call it was just
+written returns a plain scalar, not a wrapper - so this port just reads back every bin it
+needs, written or not, in one round trip.
 """
 
 import random

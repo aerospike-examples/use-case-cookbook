@@ -1,15 +1,11 @@
 """Port of ../../java-sdk's TopTransactionsAcrossDcs (itself an SDK port of ../../java).
 
-Transactions can arrive at either of two simulated DCs; each account keeps the most
-recent ``MAX_TRANSACTIONS`` transaction ids per DC in a key-ordered map (``txns_dc1``/
-``txns_dc2``, keyed by a zero-padded ``"timestamp-id"`` string so map key order == time
-order), trimmed on every write via the native CDT builder (``on_map_key(...,
-create_type=...).set_to(...)`` then ``on_map_index_range(-N).remove_all_others()`` - this
-SDK's equivalent of ../../java-sdk's ``.onMapKey(...).upsert(...)``/
-``.onMapIndexRange(-N).removeAllOthers()``). Reading an account's overall top transactions
-means merging both DC maps and taking the most recent entries across both - see
-:meth:`TopTransactionsAcrossDcs.get_top_results` for why that merge is done client-side
-here rather than as a single AEL read the way ../../java-sdk does it.
+Transactions can arrive at either of two simulated DCs; each account keeps the most recent
+``MAX_TRANSACTIONS`` transaction ids per DC in a key-ordered map (``txns_dc1``/``txns_dc2``,
+keyed by a zero-padded ``"timestamp-id"`` string so map key order == time order), trimmed on
+every write via ``on_map_key(...).set_to(...)`` then ``on_map_index_range(-N).remove_all_others()``.
+Reading an account's overall top transactions merges both DC maps and takes the most recent
+entries across both - see :meth:`TopTransactionsAcrossDcs.get_top_results`.
 """
 
 import random
@@ -165,15 +161,11 @@ class TopTransactionsAcrossDcs(UseCase):
     def get_top_results(self, session: Session, count: int, account_id: str) -> list[Transaction]:
         """Return an account's most recent transactions across both DC maps, newest first.
 
-        Merges the two per-DC maps and takes the top N as a single AEL read - matching
-        ../../java-sdk's ``let (merged = $.dc1.putItems($.dc2)) then ((${merged}).{-N:})``,
-        wrapped in a ``when`` for a DC bin that doesn't exist yet (an account may not have
-        transactions in both DCs). ``putItems()`` is a write-shaped path terminal, so this
-        needs server-side AEL compilation (Aerospike 8.2.0+); see ``../README.md``. ``{-N:}``
-        returns the top N map entries in ascending key order, so the result is reversed to get
-        newest-first. Over-fetches by a few entries (same as ../../java-sdk) since a
-        transaction's map entry can arrive slightly before the transaction record itself is
-        written.
+        Merges the two per-DC maps and takes the top N as a single AEL read, matching
+        ../../java-sdk, wrapped in a ``when`` for a DC bin that doesn't exist yet (an account may
+        not have transactions in both DCs). ``{-N:}`` returns entries in ascending key order, so
+        the result is reversed to get newest-first. Over-fetches by a few entries since a
+        transaction's map entry can arrive slightly before the transaction record itself.
         """
         count_to_use = count + 3
         ael = f"""

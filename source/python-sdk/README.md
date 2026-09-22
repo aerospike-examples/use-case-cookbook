@@ -13,25 +13,15 @@ You need **Python 3.11+** and a running Aerospike cluster on **build 8.2.0 or la
 requires server-side AEL compilation, only available from 8.2.0 onward (see "Expressions: AEL"
 below).
 
-**This module currently requires an Aerospike-internal package build**, not just public PyPI - see
-`requirements.txt` for why. If you're external to Aerospike, everything except AEL string filters
-still works against the plain public `aerospike-sdk` release; internal readers, generate a JFrog
-identity token (JFrog UI → avatar → *Edit Profile* → *Identity Tokens*; username is your Aerospike
-email) and put it in `~/.netrc`:
-
-```
-machine artifact.aerospike.io
-login you@aerospike.com
-password <your-identity-token>
-```
-
-then:
+**This module currently pins a pre-release SDK build not yet on public PyPI** - see
+`requirements.txt`. Everything except AEL string filters still works against the plain public
+`aerospike-sdk` release. This will switch back to a plain public-PyPI pin once a public release
+containing the AEL fix ships.
 
 ```
 cd source/python-sdk
 python3.12 -m venv .venv        # or any 3.11+ interpreter
 source .venv/bin/activate
-export PIP_EXTRA_INDEX_URL="https://artifact.aerospike.io/artifactory/api/pypi/database-pypi-dev-local/simple/"
 pip install -r requirements.txt
 python main.py -uc "Demo setup"
 ```

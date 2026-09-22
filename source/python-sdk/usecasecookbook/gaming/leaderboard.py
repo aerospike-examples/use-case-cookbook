@@ -4,12 +4,13 @@ javadoc). A scoreboard is stored as a key-ordered map per score "bucket"
 ``"score-playerId"`` composite string (so map key order == score order) and each map
 value is the player id.
 
-Reading the players around a given score/player uses ``on_map_key_relative_index_range`` to
-fetch a clamped index range either side of the player's map key in one round trip - it clamps at
-the bucket's boundaries and, when the anchor key is stale (the player's score changed
-concurrently), falls back to the range around where that key would sort. Overflow past the
-current bucket's boundary is then resolved by reading extra keys from neighboring buckets via
-``on_map_index_range``, mirroring ../../java's addOverflow*PlayersIfNeeded.
+Reading the players around a given score/player uses AEL's relative-range map selector
+(``{-N:N~key}.getKeys()``) to fetch a clamped index range either side of the player's map key in
+one round trip - it clamps at the bucket's boundaries and, when the anchor key is stale (the
+player's score changed concurrently), falls back to the range around where that key would sort -
+same technique as ../../java-sdk's ``getScoresAroundPlayer``. Overflow past the current bucket's
+boundary is then resolved by reading extra keys from neighboring buckets via
+``on_map_index_range``, matching ../../java-sdk's addOverflow*PlayersIfNeeded there too.
 """
 
 import random
@@ -236,18 +237,19 @@ class Leaderboard(UseCase):
         for the rest.
         """
         map_key = self._map_key(player_id, score)
+        escaped_key = map_key.replace("'", "\\'")
+        n = num_players_either_side
+        ael = f"$.{SCOREBOARD_BIN}.{{-{n}:{n}~'{escaped_key}'}}.getKeys()"
         bucket = self._determine_bucket_for_score(score)
 
         row = (
             session.query(self._scoreboard_key(score))
-            .bin(SCOREBOARD_BIN)
-            .on_map_key_relative_index_range(map_key, -num_players_either_side, 2 * num_players_either_side + 1)
-            .get_keys()
+            .bin("combined").select_from(ael)
             .execute().first()
         )
         combined: list[str] = []
         if row is not None and row.is_ok and row.record is not None:
-            combined = list(row.record.bins.get(SCOREBOARD_BIN) or [])
+            combined = list(row.record.bins.get("combined") or [])
 
         # map_key may be stale (the player's score changed concurrently) and absent from
         # combined - bisect_left gives the correct split point either way, since combined is

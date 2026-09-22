@@ -1,4 +1,5 @@
-# This module's AEL usage needs server-side AEL compilation, added after the 0.9.0a5 public
-# PyPI release - see README.md's "Expressions: AEL"/Setup sections. Pinned to an Aerospike-internal
-# dev build until a public release with that fix ships; switch back to a plain PyPI pin then.
+# Pre-release build not yet on public PyPI - needed for server-side AEL compilation and the
+# aerospike_sdk.sync.Session/TransactionalSession API this module uses throughout; see README.md's
+# Setup/"Expressions: AEL" sections. Switch back to a plain PyPI pin once a public release with
+# both ships.
 aerospike-sdk==0.9.0a6.dev95

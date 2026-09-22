@@ -8,19 +8,20 @@ examples in [`../java-sdk`](../java-sdk/README.md). The new SDK is currently **p
 
 ## Setup
 
-You need **Python 3.11+** and a running Aerospike cluster on **build 8.2.0 or later** (see
-[`../java`](../java/README.md#setup) for general cluster-setup pointers) — this module's AEL usage
-requires server-side AEL compilation, only available from 8.2.0 onward (see "Expressions: AEL"
-below).
+You need **Python 3.12+** (the version this was built and tested against) and a running Aerospike
+cluster on **build 8.2.0 or later** (see [`../java`](../java/README.md#setup) for general
+cluster-setup pointers) — this module's AEL usage requires server-side AEL compilation, only
+available from 8.2.0 onward (see "Expressions: AEL" below).
 
 **This module currently pins a pre-release SDK build not yet on public PyPI** - see
-`requirements.txt`. Everything except AEL string filters still works against the plain public
-`aerospike-sdk` release. This will switch back to a plain public-PyPI pin once a public release
-containing the AEL fix ships.
+`requirements.txt`. This isn't just an AEL-syntax difference: the public PyPI release predates the
+`aerospike_sdk.sync.Session`/`TransactionalSession` names this port imports throughout, so nothing
+here runs against it. This will switch back to a plain public-PyPI pin once a public release with
+that API shape ships.
 
 ```
 cd source/python-sdk
-python3.12 -m venv .venv        # or any 3.11+ interpreter
+python3.12 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 python main.py -uc "Demo setup"
@@ -67,11 +68,11 @@ This SDK supports **AEL** (Aerospike Expression Language) via `.where(ael_string
 `insert_from`/`update_from` (computed writes) — the same canonical grammar `../java-sdk` uses,
 including type-suffix path pins (`$.bin:INT`), write-shaped path terminals (`.append(value)`,
 `.putItems(...)`, etc.), and wildcard/key-range filter chains (`&[?(...)]`). AEL strings are
-compiled **server-side**, which is why this needs Aerospike 8.2.0+ and the internal SDK build
+compiled **server-side**, which is why this needs Aerospike 8.2.0+ and the pre-release SDK build
 pinned in `requirements.txt` (see Setup above).
 
 `recordversioning/delta_versioning_records.py` is the one place that uses the programmatic
-`aerospike_sdk.Exp` (`FilterExpression`) builder instead of an AEL string, for the same reason
+`aerospike_sdk.Exp` builder instead of an AEL string, for the same reason
 `../java-sdk` does: its snapshot-and-compare technique needs to close a map entry discovered at
 runtime by value, and AEL selector operands must be static literals. `select_from`/`insert_from`/
 `update_from`/`upsert_from` all accept `Union[str, FilterExpression]`, so AEL and `Exp` mix freely

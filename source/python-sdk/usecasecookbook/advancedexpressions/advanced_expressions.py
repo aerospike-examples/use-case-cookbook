@@ -1,13 +1,6 @@
-"""Port of ../../java-sdk's AdvancedExpressions (itself an SDK port of ../../java). Not a
-use case per se but a set of techniques for advanced expression usage:
-
-1. Checking whether a value is in a list bin (``"Sunroof" IN features``)
-2. Checking whether a bin's value is in a passed-in list (``color IN ["Red","Green","Blue"]``)
-3. Performing multiple operations, some depending on others' results, within one write
-
-All three port to AEL exactly as ../../java-sdk has them - including technique 3's single
-nested ``let``/``when`` write with ``append(value)`` branches, which requires server-side AEL
-compilation (Aerospike 8.2.0+; see ``../README.md``).
+"""Port of ../../java-sdk's AdvancedExpressions (itself an SDK port of ../../java) - see
+:meth:`AdvancedExpressions.get_description` for what this demonstrates. Ports to AEL exactly as
+../../java-sdk has it, including the single nested ``let``/``when`` write in technique 3.
 """
 
 import random

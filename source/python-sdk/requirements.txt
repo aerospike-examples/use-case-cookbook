@@ -1,0 +1,5 @@
+# Pre-release build not yet on public PyPI - needed for server-side AEL compilation and the
+# aerospike_sdk.sync.Session/TransactionalSession API this module uses throughout; see README.md's
+# Setup/"Expressions: AEL" sections. Switch back to a plain PyPI pin once a public release with
+# both ships.
+aerospike-sdk==0.9.0a6.dev95

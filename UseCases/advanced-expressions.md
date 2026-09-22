@@ -1,7 +1,7 @@
 # Advanced Expression usage
 [Back to all use cases](../README.md)
 
-[Link to working code (legacy Java client)](../source/java/src/main/java/com/aerospike/examples/advancedexpressions/AdvancedExpressions.java) | [Link to working code (Java SDK)](../source/java-sdk/src/main/java/com/aerospike/examples/advancedexpressions/AdvancedExpressions.java)
+[Link to working code (legacy Java client)](../source/java/src/main/java/com/aerospike/examples/advancedexpressions/AdvancedExpressions.java) | [Link to working code (Java SDK)](../source/java-sdk/src/main/java/com/aerospike/examples/advancedexpressions/AdvancedExpressions.java) | [Link to working code (Python SDK)](../source/python-sdk/usecasecookbook/advancedexpressions/advanced_expressions.py)
 
 ## Use case
 This is a collection of different techniques which can be used to generate very powerful expressions. Aerospike expressions are used for filtering

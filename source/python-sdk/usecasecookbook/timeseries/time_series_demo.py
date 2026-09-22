@@ -249,10 +249,17 @@ def _read_filtered_bucket(
     (a key-range selector chained with a ``&[?(...)]`` filter on the loop variable's first
     element); without one, the simpler native ``on_map_key_range(...).get_values()`` CDT
     operation is used directly.
+
+    This SDK build has no bind-value equivalent of ../../java-sdk's ``PreparedAel`` (its javadoc
+    warns against hand-rolled quoting for exactly this reason), so the range keys and device ids
+    are escaped into the AEL string literals manually instead.
     """
     if device_filter:
-        device_list = ", ".join(f"'{device_id}'" for device_id in device_filter)
-        ael = f'$.{BIN_NAME}.{{@"{earliest_event_id}":"{latest_event_id}"}}&[?(@.[0] in [{device_list}])]'
+        earliest_esc = earliest_event_id.replace('"', '\\"')
+        latest_esc = latest_event_id.replace('"', '\\"')
+        escaped_devices = [device_id.replace("'", "\\'") for device_id in device_filter]
+        device_list = ", ".join(f"'{device_id}'" for device_id in escaped_devices)
+        ael = f'$.{BIN_NAME}.{{@"{earliest_esc}":"{latest_esc}"}}&[?(@.[0] in [{device_list}])]'
         stream = session.query(key).bin(BIN_NAME).select_from(ael).execute()
     else:
         stream = (

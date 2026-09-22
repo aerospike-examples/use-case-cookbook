@@ -361,11 +361,15 @@ def _read_filtered_bucket(
 ) -> list:
     """Same technique as time_series_demo.py's ``_read_filtered_bucket``: with a device filter,
     the key-range selection and device-id filter run in one server-side AEL expression; without
-    one, the native ``on_map_key_range(...).get_values()`` CDT operation is used directly.
+    one, the native ``on_map_key_range(...).get_values()`` CDT operation is used directly. See
+    that function's docstring for why the range keys/device ids are escaped manually.
     """
     if device_filter:
-        device_list = ", ".join(f"'{device_id}'" for device_id in device_filter)
-        ael = f'$.{BIN_NAME}.{{@"{earliest_event_id}":"{latest_event_id}"}}&[?(@.[0] in [{device_list}])]'
+        earliest_esc = earliest_event_id.replace('"', '\\"')
+        latest_esc = latest_event_id.replace('"', '\\"')
+        escaped_devices = [device_id.replace("'", "\\'") for device_id in device_filter]
+        device_list = ", ".join(f"'{device_id}'" for device_id in escaped_devices)
+        ael = f'$.{BIN_NAME}.{{@"{earliest_esc}":"{latest_esc}"}}&[?(@.[0] in [{device_list}])]'
         stream = session.query(key).bin(BIN_NAME).select_from(ael).execute()
     else:
         stream = (
